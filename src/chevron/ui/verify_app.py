@@ -8,12 +8,12 @@ from typing import Any
 import cv2
 import numpy as np
 
-from ..calib.homography import apply_homography, compute_homography
-from ..render.blend import blend_layers
-from ..render.warp import warp_to_canvas
-from ..split.layout import get_layout
-from ..utils.config import load_config
-from ..utils.io import read_json
+from chevron.calib.homography import apply_homography, compute_homography
+from chevron.render.blend import blend_layers
+from chevron.render.warp import warp_to_canvas
+from chevron.split.layout import get_layout
+from chevron.utils.config import load_config
+from chevron.utils.io import read_json
 
 VIEW_NAMES = ["top", "bottom_left", "bottom_right"]
 
