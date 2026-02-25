@@ -48,3 +48,29 @@ def test_reprojection_metrics_synthetic_identity_mapping():
     assert metrics[0]["view"] == "top"
     assert metrics[0]["avg_px"] < 1e-5
     assert metrics[0]["p95_px"] < 1e-5
+
+
+def test_reprojection_metrics_handles_mismatched_point_counts():
+    correspondences = {
+        "top": {
+            "image_points": [[0, 0], [1, 0], [1, 1], [0, 1], [0.5, 0.5]],
+            "field_points": [[0, 0], [2, 0], [2, 2], [0, 2]],
+        }
+    }
+    homographies = {
+        "top": np.array(
+            [
+                [2.0, 0.0, 0.0],
+                [0.0, 2.0, 0.0],
+                [0.0, 0.0, 1.0],
+            ],
+            dtype=np.float32,
+        )
+    }
+
+    metrics = compute_reprojection_metrics(correspondences, homographies)
+
+    assert len(metrics) == 1
+    assert metrics[0]["view"] == "top"
+    assert metrics[0]["count"] == 4
+    assert metrics[0]["avg_px"] < 1e-5

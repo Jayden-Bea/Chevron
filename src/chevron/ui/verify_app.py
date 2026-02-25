@@ -125,8 +125,11 @@ def compute_reprojection_metrics(correspondences: dict[str, dict[str, list[list[
             continue
         src = np.array(pairs.get("image_points", []), dtype=np.float32)
         dst = np.array(pairs.get("field_points", []), dtype=np.float32)
-        if src.shape[0] == 0 or dst.shape[0] == 0:
+        n = min(src.shape[0], dst.shape[0])
+        if n == 0:
             continue
+        src = src[:n]
+        dst = dst[:n]
         pred = apply_homography(h, src)
         errs = np.linalg.norm(pred - dst, axis=1)
         metrics.append(
