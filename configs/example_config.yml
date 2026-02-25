@@ -1,0 +1,40 @@
+rois:
+  start: [40, 40, 200, 80]
+  stop: [260, 40, 200, 80]
+  clock: [500, 40, 140, 80]
+templates:
+  # user-provided templates (repo does not ship binary images)
+  start: configs/templates/start.png
+  stop: configs/templates/stop.png
+thresholds:
+  start: 0.8
+  stop: 0.8
+debounce:
+  min_start_s: 0.5
+  min_stop_s: 0.5
+  min_match_s: 60.0
+  max_match_s: 220.0
+split:
+  crops:
+    top: [0, 0, 1920, 540]
+    bottom_left: [0, 540, 960, 540]
+    bottom_right: [960, 540, 960, 540]
+field:
+  width_units: 16.46
+  height_units: 8.23
+  px_per_unit: 120
+  origin: [0, 0]
+calibration:
+  correspondences:
+    top:
+      image_points: [[0,0], [1919,0], [1919,539], [0,539]]
+      field_points: [[0,0], [1975,0], [1975,987], [0,987]]
+    bottom_left:
+      image_points: [[0,0], [959,0], [959,539], [0,539]]
+      field_points: [[0,0], [987,0], [987,987], [0,987]]
+    bottom_right:
+      image_points: [[0,0], [959,0], [959,539], [0,539]]
+      field_points: [[987,0], [1975,0], [1975,987], [987,987]]
+ocr:
+  enabled: false
+  cadence_fps: 3
