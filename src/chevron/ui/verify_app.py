@@ -165,6 +165,22 @@ def build_composite(warped: dict[str, np.ndarray]) -> np.ndarray | None:
     return blend_layers(layers, masks)
 
 
+def resolve_selected_image(
+    selected_view: str,
+    display_broadcast: np.ndarray,
+    crop_displays: dict[str, np.ndarray],
+    warped: dict[str, np.ndarray],
+    stitched: np.ndarray | None,
+) -> np.ndarray | None:
+    if selected_view.endswith("crop"):
+        return crop_displays.get(selected_view.replace(" crop", ""))
+    if selected_view.startswith("warped"):
+        return warped.get(selected_view.replace("warped ", ""))
+    if selected_view == "stitched":
+        return stitched
+    return display_broadcast
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser()
     p.add_argument("--video", required=True)
@@ -257,14 +273,7 @@ def main(argv: list[str] | None = None) -> None:
 
     stitched = build_composite(warped) if show_warp else None
 
-    if selected_view.endswith("crop"):
-        selected_image = crop_displays[selected_view.replace(" crop", "")]
-    elif selected_view.startswith("warped"):
-        selected_image = warped.get(selected_view.replace("warped ", ""))
-    elif selected_view == "stitched":
-        selected_image = stitched
-    else:
-        selected_image = display_broadcast
+    selected_image = resolve_selected_image(selected_view, display_broadcast, crop_displays, warped, stitched)
 
     col1, col2, col3 = st.columns(3)
     with col1:

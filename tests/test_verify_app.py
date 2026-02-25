@@ -6,6 +6,7 @@ from chevron.ui.verify_app import (
     draw_polygon,
     draw_points,
     draw_rois,
+    resolve_selected_image,
 )
 
 
@@ -74,3 +75,14 @@ def test_reprojection_metrics_handles_mismatched_point_counts():
     assert metrics[0]["view"] == "top"
     assert metrics[0]["count"] == 4
     assert metrics[0]["avg_px"] < 1e-5
+
+
+
+def test_resolve_selected_image_handles_missing_crop():
+    broadcast = np.zeros((20, 30, 3), dtype=np.uint8)
+    crop_displays = {"top": np.ones((10, 10, 3), dtype=np.uint8)}
+    warped = {}
+
+    selected = resolve_selected_image("bottom_right crop", broadcast, crop_displays, warped, None)
+
+    assert selected is None
