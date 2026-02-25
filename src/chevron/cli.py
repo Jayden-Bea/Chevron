@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import subprocess
+import sys
 from pathlib import Path
 
 from .calib.homography import compute_homography
@@ -71,6 +73,34 @@ def cmd_render(args):
     render_matches(args.video, seg, calib, cfg, args.out)
 
 
+
+
+def cmd_verify(args):
+    app_path = Path(__file__).resolve().parent / "ui" / "verify_app.py"
+    cmd = [
+        sys.executable,
+        "-m",
+        "streamlit",
+        "run",
+        str(app_path),
+        "--server.port",
+        str(args.port),
+        "--server.address",
+        args.host,
+        "--server.headless",
+        "false" if args.browser else "true",
+        "--",
+        "--video",
+        args.video,
+        "--config",
+        args.config,
+    ]
+    if args.calib:
+        cmd.extend(["--calib", args.calib])
+    if args.frame is not None:
+        cmd.extend(["--frame", str(args.frame)])
+    subprocess.run(cmd, check=True)
+
 def cmd_run(args):
     work = ensure_dir(args.out)
     cfg = load_config(args.config)
@@ -126,6 +156,19 @@ def build_parser():
     s.add_argument("--config", required=True)
     s.add_argument("--out", required=True)
     s.set_defaults(func=cmd_render)
+
+
+    s = sub.add_parser("verify")
+    s.add_argument("--video", required=True)
+    s.add_argument("--config", required=True)
+    s.add_argument("--calib")
+    s.add_argument("--frame", type=int, default=0)
+    s.add_argument("--port", type=int, default=8501)
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--browser", dest="browser", action="store_true")
+    s.add_argument("--no-browser", dest="browser", action="store_false")
+    s.set_defaults(browser=True)
+    s.set_defaults(func=cmd_verify)
 
     s = sub.add_parser("run")
     s.add_argument("--url")
