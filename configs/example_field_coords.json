@@ -1,0 +1,14 @@
+{
+  "field": {
+    "width_units": 16.46,
+    "height_units": 8.23,
+    "unit_name": "meters",
+    "origin": [0, 0]
+  },
+  "landmarks": [
+    {"name": "corner_bl", "x": 0.0, "y": 0.0},
+    {"name": "corner_br", "x": 16.46, "y": 0.0},
+    {"name": "corner_tl", "x": 0.0, "y": 8.23},
+    {"name": "corner_tr", "x": 16.46, "y": 8.23}
+  ]
+}

@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "Chevron"
+version = "0.1.0"
+description = "FRC match top-down video stitching pipeline"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "opencv-python>=4.8",
+  "PyYAML>=6.0",
+]
+
+[project.optional-dependencies]
+ocr = ["pytesseract>=0.3.10"]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+chevron = "chevron.cli:main"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
