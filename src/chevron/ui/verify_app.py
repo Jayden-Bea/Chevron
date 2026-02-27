@@ -97,12 +97,14 @@ def draw_polygon(img: np.ndarray, pts4: list[list[float]] | np.ndarray) -> np.nd
 
 
 def compute_homographies(cfg: dict[str, Any], calib_data: dict[str, Any] | None) -> dict[str, np.ndarray]:
+    hs: dict[str, np.ndarray] = {}
     if calib_data and calib_data.get("homographies"):
-        return {k: np.array(v, dtype=np.float32) for k, v in calib_data["homographies"].items()}
+        hs.update({k: np.array(v, dtype=np.float32) for k, v in calib_data["homographies"].items()})
 
     corr = (cfg.get("calibration") or {}).get("correspondences") or {}
-    hs: dict[str, np.ndarray] = {}
     for view, pairs in corr.items():
+        if view in hs:
+            continue
         image_points = pairs.get("image_points") if isinstance(pairs, dict) else None
         field_points = pairs.get("field_points") if isinstance(pairs, dict) else None
         if not image_points or not field_points:

@@ -114,3 +114,32 @@ def test_compute_homographies_skips_incomplete_views():
     assert "top" in hs
     assert "bottom_left" not in hs
     assert "bottom_right" not in hs
+
+
+def test_compute_homographies_merges_calib_with_config_fallbacks():
+    cfg = {
+        "calibration": {
+            "correspondences": {
+                "top": {
+                    "image_points": [[0, 0], [1, 0], [1, 1], [0, 1]],
+                    "field_points": [[0, 0], [2, 0], [2, 2], [0, 2]],
+                },
+                "bottom_left": {
+                    "image_points": [[0, 0], [1, 0], [1, 1], [0, 1]],
+                    "field_points": [[0, 0], [3, 0], [3, 3], [0, 3]],
+                },
+            }
+        }
+    }
+    calib_data = {
+        "homographies": {
+            "top": [[2, 0, 0], [0, 2, 0], [0, 0, 1]],
+        }
+    }
+
+    hs = compute_homographies(cfg, calib_data=calib_data)
+
+    assert "top" in hs
+    assert "bottom_left" in hs
+    assert hs["top"].shape == (3, 3)
+    assert hs["bottom_left"].shape == (3, 3)
