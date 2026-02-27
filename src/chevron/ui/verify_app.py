@@ -103,7 +103,16 @@ def compute_homographies(cfg: dict[str, Any], calib_data: dict[str, Any] | None)
     corr = (cfg.get("calibration") or {}).get("correspondences") or {}
     hs: dict[str, np.ndarray] = {}
     for view, pairs in corr.items():
-        hs[view] = compute_homography(pairs["image_points"], pairs["field_points"])
+        image_points = pairs.get("image_points") if isinstance(pairs, dict) else None
+        field_points = pairs.get("field_points") if isinstance(pairs, dict) else None
+        if not image_points or not field_points:
+            continue
+        if min(len(image_points), len(field_points)) < 4:
+            continue
+        try:
+            hs[view] = compute_homography(image_points, field_points)
+        except (ValueError, RuntimeError):
+            continue
     return hs
 
 

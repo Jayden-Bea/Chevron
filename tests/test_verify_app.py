@@ -1,6 +1,7 @@
 import numpy as np
 
 from chevron.ui.verify_app import (
+    compute_homographies,
     compute_reprojection_metrics,
     draw_crops,
     draw_polygon,
@@ -86,3 +87,30 @@ def test_resolve_selected_image_handles_missing_crop():
     selected = resolve_selected_image("bottom_right crop", broadcast, crop_displays, warped, None)
 
     assert selected is None
+
+
+
+def test_compute_homographies_skips_incomplete_views():
+    cfg = {
+        "calibration": {
+            "correspondences": {
+                "top": {
+                    "image_points": [[0, 0], [1, 0], [1, 1], [0, 1]],
+                    "field_points": [[0, 0], [2, 0], [2, 2], [0, 2]],
+                },
+                "bottom_left": {
+                    "image_points": [[0, 0], [1, 0], [1, 1]],
+                    "field_points": [[0, 0], [2, 0], [2, 2]],
+                },
+                "bottom_right": {
+                    "image_points": [[0, 0], [1, 0], [1, 1], [0, 1]],
+                },
+            }
+        }
+    }
+
+    hs = compute_homographies(cfg, calib_data=None)
+
+    assert "top" in hs
+    assert "bottom_left" not in hs
+    assert "bottom_right" not in hs
