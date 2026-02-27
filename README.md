@@ -54,6 +54,27 @@ chevron calibrate --video workdir/proxy.mp4 --config configs/example_config.yml 
 chevron render --video workdir/proxy.mp4 --segments workdir/segments.json --calib workdir/calib/calib.json --config configs/example_config.yml --out out_dir/
 ```
 
+
+## Verify config (Streamlit UI)
+
+Use the verifier to inspect ROIs, crop layout, calibration correspondences, and warp/composite previews on any frame. For responsive scrubbing, run ingest first and use the normalized proxy video (`workdir/proxy.mp4`).
+
+```bash
+chevron verify --video workdir/proxy.mp4 --config configs/my_event.yml --calib workdir/calib.json
+```
+
+What the verifier shows:
+- Broadcast frame with ROI + crop overlays.
+- Per-view crops (`top`, `bottom_left`, `bottom_right`) with optional calibration points.
+- Calibration visualization as points (all correspondences) and as a quadrilateral polygon (first 4 points connected in order).
+- Warped top-down view per crop and stitched composite preview when homographies are available.
+- Reprojection metrics (`avg`, `median`, `p95`) in top-down pixels.
+
+### Quadrilateral vs rectangle
+
+- **Image-space calibration points** can be any arbitrary quadrilateral or scattered points sampled on the carpet plane; they do not need to form an axis-aligned rectangle.
+- **Destination field points** are typically laid out on a rectangular top-down canvas because that is the canonical render coordinate system.
+
 ## Outputs
 
 Per match:

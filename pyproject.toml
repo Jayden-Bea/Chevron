@@ -16,6 +16,7 @@ dependencies = [
 
 [project.optional-dependencies]
 ocr = ["pytesseract>=0.3.10"]
+ui = ["streamlit>=1.30"]
 dev = ["pytest>=8.0"]
 
 [project.scripts]
