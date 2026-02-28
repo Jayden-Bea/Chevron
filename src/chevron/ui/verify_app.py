@@ -144,13 +144,32 @@ def compute_homographies(
     return hs
 
 
-def compute_canvas_size(cfg: dict[str, Any], calib_data: dict[str, Any] | None) -> tuple[int, int]:
+
+
+def resolve_field_settings(cfg: dict[str, Any], calib_data: dict[str, Any] | None) -> dict[str, float]:
+    field_cfg = cfg.get("field") or {}
+    width_units = float(field_cfg.get("width_units", 16.46))
+    height_units = float(field_cfg.get("height_units", 8.23))
+    px_per_unit = float(field_cfg.get("px_per_unit", 120.0))
+
     if calib_data and calib_data.get("canvas"):
         canvas = calib_data["canvas"]
-        return int(canvas["width_px"]), int(canvas["height_px"])
-    field = cfg.get("field") or {}
-    px = float(field.get("px_per_unit", 120))
-    return int(float(field.get("width_units", 16.46)) * px), int(float(field.get("height_units", 8.23)) * px)
+        canvas_w = float(canvas.get("width_px", width_units * px_per_unit))
+        canvas_h = float(canvas.get("height_px", height_units * px_per_unit))
+        if width_units > 0:
+            px_per_unit = canvas_w / width_units
+        elif height_units > 0:
+            px_per_unit = canvas_h / height_units
+
+    return {
+        "width_units": width_units,
+        "height_units": height_units,
+        "px_per_unit": px_per_unit,
+    }
+
+def compute_canvas_size(cfg: dict[str, Any], calib_data: dict[str, Any] | None, field_override: dict[str, float] | None = None) -> tuple[int, int]:
+    field = field_override or resolve_field_settings(cfg, calib_data)
+    return int(field["width_units"] * field["px_per_unit"]), int(field["height_units"] * field["px_per_unit"])
 
 
 def compute_reprojection_metrics(correspondences: dict[str, dict[str, list[list[float]]]], homographies: dict[str, np.ndarray]) -> list[dict[str, float | str]]:
@@ -272,6 +291,13 @@ def main(argv: list[str] | None = None) -> None:
         ],
     )
 
+    field_settings = resolve_field_settings(cfg, calib_data)
+
+    st.sidebar.header("Field canvas editor")
+    field_width_units = st.sidebar.number_input("Field width (units)", min_value=1.0, value=float(field_settings["width_units"]), step=0.1)
+    field_height_units = st.sidebar.number_input("Field height (units)", min_value=1.0, value=float(field_settings["height_units"]), step=0.1)
+    field_px_per_unit = st.sidebar.number_input("Pixels per unit", min_value=1.0, value=float(field_settings["px_per_unit"]), step=1.0)
+
     st.sidebar.header("Calibration editor")
     editor_view = st.sidebar.selectbox("Edit view", VIEW_NAMES, key="calib_editor_view")
     point_space = st.sidebar.radio("Point space", ["image_points", "field_points"], horizontal=True)
@@ -319,9 +345,15 @@ def main(argv: list[str] | None = None) -> None:
         st.rerun()
 
     export_payload = {
+        "field": {
+            "width_units": float(field_width_units),
+            "height_units": float(field_height_units),
+            "px_per_unit": float(field_px_per_unit),
+            "origin": list((cfg.get("field") or {}).get("origin", [0, 0])),
+        },
         "calibration": {
             "correspondences": copy.deepcopy(editable_correspondences),
-        }
+        },
     }
     st.sidebar.download_button(
         "Download edited correspondences (json)",
@@ -351,7 +383,15 @@ def main(argv: list[str] | None = None) -> None:
         correspondences=homography_correspondences,
         prefer_correspondences=use_edited_for_warp,
     )
-    canvas_size = compute_canvas_size(cfg, calib_data)
+    canvas_size = compute_canvas_size(
+        cfg,
+        calib_data,
+        field_override={
+            "width_units": float(field_width_units),
+            "height_units": float(field_height_units),
+            "px_per_unit": float(field_px_per_unit),
+        },
+    )
 
     frame = reader.read_frame(frame_idx)
     display_broadcast = frame.copy()
@@ -424,6 +464,11 @@ def main(argv: list[str] | None = None) -> None:
                 "frame_count": reader.frame_count,
                 "layout": layout,
                 "rois": rois,
+                "field": {
+                    "width_units": float(field_width_units),
+                    "height_units": float(field_height_units),
+                    "px_per_unit": float(field_px_per_unit),
+                },
                 "canvas_size": {"width_px": canvas_size[0], "height_px": canvas_size[1]},
                 "editable_correspondences": editable_correspondences,
                 "warp_preview_uses_edited_correspondences": use_edited_for_warp,

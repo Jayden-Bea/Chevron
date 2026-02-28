@@ -76,7 +76,7 @@ chevron verify --video workdir/proxy.mp4 --config configs/my_event.yml --calib w
 What the verifier shows:
 - Broadcast frame with ROI + crop overlays.
 - Per-view crops (`top`, `bottom_left`, `bottom_right`) with optional calibration points.
-- Live calibration editing in the sidebar (adjust `image_points`/`field_points`, nudge points, add/delete points, and download edited correspondences JSON).
+- Live calibration editing in the sidebar (adjust `image_points`/`field_points`, nudge points, add/delete points, define field width/height + pixel scale, and download edited correspondences JSON).
 - Warp preview defaults to calibration-file homographies when `--calib` is provided; enable `preview_edited_correspondences_for_warp` in the sidebar to preview edited points directly.
 - Calibration visualization as points (all correspondences) and as a quadrilateral polygon (first 4 points connected in order).
 - Warped top-down view per crop and stitched composite preview when homographies are available.
@@ -97,8 +97,14 @@ Per match:
   - per-frame `frame_idx`, `t_video_s`, optional `t_match_s` (currently null unless OCR integration is enabled later)
   - `config_hash`, `calib_version`
 
-- `chevron run` writes progress checkpoints to `out_dir/workdir/run_status.json` (ingest/segment/calibrate/render stage updates).
+Raw extracted source clips before top-down rendering:
+- `matches_raw/match_<n>.mp4`
+- `matches_raw/matches_raw.json`
+
+- `chevron run` writes progress checkpoints to `out_dir/workdir/run_status.json` (ingest/segment/calibrate/render stage updates, including per-match render progress).
+- Optional monitoring knobs in config: `monitoring.segment_progress_interval_s` and `monitoring.render_progress_interval_s` (seconds).
 - `chevron run` defaults to `--resume`, so if `workdir/ingest_meta.json` + proxy already exist, ingest is reused instead of re-running.
+- On resumed runs, already-rendered match outputs are detected (`match_<n>/topdown.mp4` + `match_meta.json`) and skipped; only missing matches are rendered.
 Debug artifacts:
 - segment score frames in `segment_debug/`
 - split layout preview image
