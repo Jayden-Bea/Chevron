@@ -19,9 +19,9 @@ debounce:
   max_match_s: 220.0
 split:
   crops:
-    top: [0, 0, 1920, 540]
-    bottom_left: [0, 540, 960, 540]
-    bottom_right: [960, 540, 960, 540]
+    top: [0, 0, 2047, 819]
+    bottom_left: [0, 820, 1008, 1278]
+    bottom_right: [1040, 820, 2047, 1278]
 field:
   width_units: 16.46
   height_units: 8.23
