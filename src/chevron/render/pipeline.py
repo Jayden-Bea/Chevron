@@ -21,6 +21,7 @@ def render_matches(
     out_dir: str | Path,
     progress_interval_s: float = 5.0,
     progress_callback=None,
+    skip_existing: bool = True,
 ) -> list[str]:
     out = ensure_dir(out_dir)
     cap = cv2.VideoCapture(video_path)
@@ -37,12 +38,29 @@ def render_matches(
 
     for i, seg in enumerate(segments, start=1):
         match_dir = ensure_dir(out / f"match_{i:03d}")
-        writer = VideoWriter(match_dir / "topdown.mp4", fps=fps, size=size)
+        output_path = match_dir / "topdown.mp4"
+        meta_path = match_dir / "match_meta.json"
         start_idx = int(seg["start_time_s"] * fps)
         end_idx = int(seg["end_time_s"] * fps)
-        cap.set(cv2.CAP_PROP_POS_FRAMES, start_idx)
         total_match_frames = max(end_idx - start_idx, 0)
         frame_log_interval = max(1, int(round(safe_interval_s * fps)))
+
+        if skip_existing and output_path.exists() and meta_path.exists() and output_path.stat().st_size > 0:
+            outputs.append(str(output_path))
+            if progress_callback:
+                progress_callback(
+                    {
+                        "event": "match_skipped",
+                        "match_index": i,
+                        "total_matches": len(segments),
+                        "output": str(output_path),
+                        "reason": "already_rendered",
+                    }
+                )
+            continue
+
+        writer = VideoWriter(output_path, fps=fps, size=size)
+        cap.set(cv2.CAP_PROP_POS_FRAMES, start_idx)
 
         if progress_callback:
             progress_callback(
@@ -98,8 +116,8 @@ def render_matches(
             "config_hash": stable_hash(cfg),
             "calib_version": calib.get("version", "v1"),
         }
-        write_json(match_dir / "match_meta.json", meta)
-        outputs.append(str(match_dir / "topdown.mp4"))
+        write_json(meta_path, meta)
+        outputs.append(str(output_path))
         if progress_callback:
             progress_callback(
                 {
@@ -107,7 +125,7 @@ def render_matches(
                     "match_index": i,
                     "total_matches": len(segments),
                     "written_frames": len(frame_meta),
-                    "output": str(match_dir / "topdown.mp4"),
+                    "output": str(output_path),
                 }
             )
 

@@ -107,3 +107,18 @@ def test_export_raw_matches_writes_expected_clips(monkeypatch, tmp_path):
     assert outputs[0].endswith("match_001.mp4")
     assert outputs[1].endswith("match_003.mp4")
     assert (tmp_path / "matches_raw" / "matches_raw.json").exists()
+
+
+def test_format_render_progress_for_skipped_match():
+    message = _format_render_progress(
+        {
+            "event": "match_skipped",
+            "match_index": 1,
+            "total_matches": 3,
+            "reason": "already_rendered",
+            "output": "out/match_001/topdown.mp4",
+        }
+    )
+
+    assert "render skipped" in message
+    assert "reason=already_rendered" in message

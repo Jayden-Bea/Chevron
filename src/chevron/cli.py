@@ -77,6 +77,14 @@ def _format_render_progress(details: dict) -> str:
             f"output={details.get('output')}"
         )
 
+    if event == "match_skipped":
+        return (
+            "[chevron] run: render skipped "
+            f"match={match_index}/{total_matches} "
+            f"reason={details.get('reason')} "
+            f"output={details.get('output')}"
+        )
+
     return f"[chevron] run: render event={event} details={details}"
 
 

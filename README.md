@@ -104,6 +104,7 @@ Raw extracted source clips before top-down rendering:
 - `chevron run` writes progress checkpoints to `out_dir/workdir/run_status.json` (ingest/segment/calibrate/render stage updates, including per-match render progress).
 - Optional monitoring knobs in config: `monitoring.segment_progress_interval_s` and `monitoring.render_progress_interval_s` (seconds).
 - `chevron run` defaults to `--resume`, so if `workdir/ingest_meta.json` + proxy already exist, ingest is reused instead of re-running.
+- On resumed runs, already-rendered match outputs are detected (`match_<n>/topdown.mp4` + `match_meta.json`) and skipped; only missing matches are rendered.
 Debug artifacts:
 - segment score frames in `segment_debug/`
 - split layout preview image
