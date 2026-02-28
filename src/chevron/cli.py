@@ -234,8 +234,10 @@ def cmd_calibrate(args):
     _log(f"[chevron] calibrate: extracting view frames -> {out / 'calib_frames'}")
     extract_view_frames(args.video, crops, out / "calib_frames")
 
+    correspondences = getattr(args, "correspondences", None) or cfg["calibration"]["correspondences"]
+
     homographies = {}
-    for cam_name, pairs in cfg["calibration"]["correspondences"].items():
+    for cam_name, pairs in correspondences.items():
         _log(f"[chevron] calibrate: computing homography for view={cam_name} points={len(pairs.get('image_points', []))}")
         h = compute_homography(pairs["image_points"], pairs["field_points"])
         homographies[cam_name] = h.tolist()
@@ -287,30 +289,12 @@ def cmd_render(args):
 
 
 def cmd_verify(args):
-    app_path = Path(__file__).resolve().parent / "ui" / "verify_app.py"
-    cmd = [
-        sys.executable,
-        "-m",
-        "streamlit",
-        "run",
-        str(app_path),
-        "--server.port",
-        str(args.port),
-        "--server.address",
-        args.host,
-        "--server.headless",
-        "false" if args.browser else "true",
-        "--",
-        "--video",
-        args.video,
-        "--config",
-        args.config,
-    ]
-    if args.calib:
-        cmd.extend(["--calib", args.calib])
-    if args.frame is not None:
-        cmd.extend(["--frame", str(args.frame)])
-    subprocess.run(cmd, check=True)
+    from .ui.verify_gui import run_local_verify
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    run_local_verify(args.video, args.config, out_json=out, frame_idx=args.frame)
+    _log(f"[chevron] verify: saved correspondences -> {out}")
 
 def cmd_run(args):
     from .ingest import ingest
@@ -355,34 +339,29 @@ def cmd_run(args):
 
     calib_out = workdir / "calib"
     calib_path = calib_out / "calib.json"
-    calib = _load_existing_calibration(calib_path) if args.resume else None
-    if calib is not None:
-        _log(f"[chevron] run: reusing calibration -> {calib_path}")
-        _write_run_status(run_status_path, "calibrate_reused", {"calib": str(calib_path)})
-    else:
-        _log("[chevron] run: verify stage")
-        _write_run_status(run_status_path, "verify_starting", {"video": proxy, "config": args.config})
-        verify_namespace = argparse.Namespace(
-            video=proxy,
-            config=args.config,
-            calib=str(calib_path) if calib_path.exists() else None,
-            frame=0,
-            port=args.verify_port,
-            host=args.verify_host,
-            browser=args.verify_browser,
-        )
-        cmd_verify(verify_namespace)
-        _write_run_status(run_status_path, "verify_complete", {"video": proxy, "config": args.config})
+    verify_out = workdir / "verify_correspondences.json"
 
-        _log("[chevron] run: calibrate stage")
-        _write_run_status(run_status_path, "calibrate_starting", {"out": str(calib_out)})
-        namespace = argparse.Namespace(video=proxy, config=args.config, out=calib_out)
-        cmd_calibrate(namespace)
-        calib = read_json(calib_path)
-        _write_run_status(run_status_path, "calibrate_complete", {"calib": str(calib_path)})
+    _log("[chevron] run: verify stage")
+    _write_run_status(run_status_path, "verify_starting", {"video": proxy, "config": args.config})
+    verify_namespace = argparse.Namespace(
+        video=proxy,
+        config=args.config,
+        out=str(verify_out),
+        frame=0,
+    )
+    cmd_verify(verify_namespace)
+    verified = read_json(verify_out)
+    correspondences = verified.get("correspondences", {})
+    _write_run_status(run_status_path, "verify_complete", {"video": proxy, "config": args.config, "out": str(verify_out)})
+
+    _log("[chevron] run: calibrate stage")
+    _write_run_status(run_status_path, "calibrate_starting", {"out": str(calib_out)})
+    namespace = argparse.Namespace(video=proxy, config=args.config, out=calib_out, correspondences=correspondences)
+    cmd_calibrate(namespace)
+    calib = read_json(calib_path)
+    _write_run_status(run_status_path, "calibrate_complete", {"calib": str(calib_path)})
 
     seg = read_json(segments_path)["segments"]
-    assert calib is not None
     _log("[chevron] run: raw match export stage")
     raw_out = work / "matches_raw"
     _write_run_status(run_status_path, "raw_export_starting", {"matches_raw_out": str(raw_out)})
@@ -454,13 +433,8 @@ def build_parser():
     s = sub.add_parser("verify")
     s.add_argument("--video", required=True)
     s.add_argument("--config", required=True)
-    s.add_argument("--calib")
+    s.add_argument("--out", required=True)
     s.add_argument("--frame", type=int, default=0)
-    s.add_argument("--port", type=int, default=8501)
-    s.add_argument("--host", default="127.0.0.1")
-    s.add_argument("--browser", dest="browser", action="store_true")
-    s.add_argument("--no-browser", dest="browser", action="store_false")
-    s.set_defaults(browser=True)
     s.set_defaults(func=cmd_verify)
 
     s = sub.add_parser("run")

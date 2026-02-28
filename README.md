@@ -66,22 +66,19 @@ chevron render --video workdir/proxy.mp4 --segments workdir/segments.json --cali
 ```
 
 
-## Verify config (Streamlit UI)
+## Verify config (local OpenCV UI)
 
-Use the verifier to inspect ROIs, crop layout, calibration correspondences, and warp/composite previews on any frame. For responsive scrubbing, run ingest first and use the normalized proxy video (`workdir/proxy.mp4`).
+Use the local verifier to define/adjust calibration correspondences before calibration. It opens native OpenCV windows (no webserver) after segmentation during `chevron run`.
 
 ```bash
-chevron verify --video workdir/proxy.mp4 --config configs/my_event.yml --calib workdir/calib.json
+chevron verify --video workdir/proxy.mp4 --config configs/my_event.yml --out workdir/verify_correspondences.json
 ```
 
-What the verifier shows:
-- Broadcast frame with ROI + crop overlays.
-- Per-view crops (`top`, `bottom_left`, `bottom_right`) with optional calibration points.
-- Live calibration editing in the sidebar (adjust `image_points`/`field_points`, nudge points, add/delete points, define field width/height + pixel scale, and download edited correspondences JSON).
-- Warp preview defaults to calibration-file homographies when `--calib` is provided; enable `preview_edited_correspondences_for_warp` in the sidebar to preview edited points directly.
-- Calibration visualization as points (all correspondences) and as a quadrilateral polygon (first 4 points connected in order).
-- Warped top-down view per crop and stitched composite preview when homographies are available.
-- Reprojection metrics (`avg`, `median`, `p95`) in top-down pixels.
+What the local verifier does:
+- Opens one crop window and one field-canvas window per view (`top`, `bottom_left`, `bottom_right`).
+- Click an **image point** in the crop, then click its matching **field point** in the field canvas.
+- Keyboard controls: `n`/`Space`/`Enter` (next view), `u` (undo last pair), `c` (clear current view), `q` (save + quit), `Esc` (cancel).
+- Saves correspondences JSON to the path given by `--out`.
 
 ### Quadrilateral vs rectangle
 
@@ -108,7 +105,7 @@ Raw extracted source clips before top-down rendering:
 - `matches_raw/matches_raw.json`
 
 - `chevron run` writes progress checkpoints to `out_dir/workdir/run_status.json` (ingest/segment/verify/calibrate/render stage updates, including per-match render progress).
-- After segmentation, `chevron run` automatically launches `chevron verify` so users can edit image/field correspondences before calibration and render.
+- After segmentation, `chevron run` automatically launches a local OpenCV verifier so users can edit image/field correspondences before calibration and render.
 - Optional monitoring knobs in config: `monitoring.segment_progress_interval_s` and `monitoring.render_progress_interval_s` (seconds).
 - `chevron run` defaults to `--resume`, so if `workdir/ingest_meta.json` + proxy already exist, ingest is reused instead of re-running.
 - On resumed runs, already-rendered match outputs are detected (`match_<n>/topdown.mp4` + `match_meta.json`) and skipped; only missing matches are rendered.

@@ -144,7 +144,23 @@ def test_load_existing_calibration_reads_existing_file(tmp_path):
     assert calib == {"version": "v1"}
 
 
-def test_run_parser_defaults_to_verify_browser_enabled():
+def test_verify_parser_requires_output_path():
+    parser = build_parser()
+
+    args = parser.parse_args([
+        "verify",
+        "--video",
+        "proxy.mp4",
+        "--config",
+        "configs/example_config.yml",
+        "--out",
+        "out/verify_correspondences.json",
+    ])
+
+    assert args.out.endswith("verify_correspondences.json")
+
+
+def test_run_parser_defaults_resume_enabled():
     parser = build_parser()
 
     args = parser.parse_args([
@@ -157,24 +173,7 @@ def test_run_parser_defaults_to_verify_browser_enabled():
         "out_dir",
     ])
 
-    assert args.verify_browser is True
-
-
-def test_run_parser_no_verify_browser_flag_overrides_default():
-    parser = build_parser()
-
-    args = parser.parse_args([
-        "run",
-        "--video",
-        "proxy.mp4",
-        "--config",
-        "configs/example_config.yml",
-        "--out",
-        "out_dir",
-        "--no-verify-browser",
-    ])
-
-    assert args.verify_browser is False
+    assert args.resume is True
 
 
 def test_resolve_output_fps_uses_config_when_available():
