@@ -27,6 +27,7 @@ pip install -e .[dev]
 
 1) Edit `configs/example_config.yml` for your event:
 - Set ROI rectangles for start/stop/clock overlays.
+- `start.png` and `stop.png` are matched *inside* those ROIs (or inside the full frame if `rois.start`/`rois.stop` are omitted).
 - Replace template image paths with screenshots from your broadcast.
 - Add your own `configs/templates/start.png` and `configs/templates/stop.png` (not bundled in-repo).
 - Set crop rectangles (or use `split` preview helper).
@@ -36,6 +37,7 @@ pip install -e .[dev]
 
 ```bash
 chevron run --url "https://youtube.com/watch?v=..." --config configs/example_config.yml --out out_dir/
+# reruns automatically reuse existing ingest output in out_dir/workdir by default
 ```
 
 For local files:
@@ -66,6 +68,7 @@ chevron verify --video workdir/proxy.mp4 --config configs/my_event.yml --calib w
 What the verifier shows:
 - Broadcast frame with ROI + crop overlays.
 - Per-view crops (`top`, `bottom_left`, `bottom_right`) with optional calibration points.
+- Live calibration editing in the sidebar (adjust `image_points`/`field_points`, nudge points, add/delete points, and download edited correspondences JSON).
 - Calibration visualization as points (all correspondences) and as a quadrilateral polygon (first 4 points connected in order).
 - Warped top-down view per crop and stitched composite preview when homographies are available.
 - Reprojection metrics (`avg`, `median`, `p95`) in top-down pixels.
@@ -85,6 +88,8 @@ Per match:
   - per-frame `frame_idx`, `t_video_s`, optional `t_match_s` (currently null unless OCR integration is enabled later)
   - `config_hash`, `calib_version`
 
+- `chevron run` writes progress checkpoints to `out_dir/workdir/run_status.json` (ingest/segment/calibrate/render stage updates).
+- `chevron run` defaults to `--resume`, so if `workdir/ingest_meta.json` + proxy already exist, ingest is reused instead of re-running.
 Debug artifacts:
 - segment score frames in `segment_debug/`
 - split layout preview image

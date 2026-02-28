@@ -49,6 +49,36 @@ def _roi(frame, rect):
     return frame[y : y + h, x : x + w]
 
 
+def _resolve_search_rect(frame, rect, template_name: str) -> list[int]:
+    frame_h, frame_w = frame.shape[:2]
+    if rect is None:
+        return [0, 0, frame_w, frame_h]
+    if len(rect) != 4:
+        raise ValueError(f"ROI '{template_name}' must be [x, y, w, h], got {rect}")
+    return [int(v) for v in rect]
+
+
+def _validate_match_inputs(frame, rect, template, template_name: str) -> None:
+    if template is None:
+        raise ValueError(f"Template image for '{template_name}' could not be loaded")
+
+    x, y, w, h = map(int, rect)
+    if w <= 0 or h <= 0:
+        raise ValueError(f"ROI '{template_name}' must have positive width/height, got {rect}")
+
+    frame_h, frame_w = frame.shape[:2]
+    if x < 0 or y < 0 or x + w > frame_w or y + h > frame_h:
+        raise ValueError(
+            f"ROI '{template_name}' {rect} is outside frame bounds {(frame_w, frame_h)}"
+        )
+
+    tpl_h, tpl_w = template.shape[:2]
+    if h < tpl_h or w < tpl_w:
+        raise ValueError(
+            f"ROI '{template_name}' size {(w, h)} is smaller than template size {(tpl_w, tpl_h)}; "
+            "OpenCV matchTemplate requires ROI >= template"
+        )
+
 def _template_score(img, template):
     out = cv2.matchTemplate(img, template, cv2.TM_CCOEFF_NORMED)
     _, max_val, _, _ = cv2.minMaxLoc(out)
@@ -62,8 +92,9 @@ def detect_segments(video_path: str | Path, cfg: dict, out_json: str | Path, deb
 
     start_tpl = cv2.imread(cfg["templates"]["start"], cv2.IMREAD_COLOR)
     stop_tpl = cv2.imread(cfg["templates"]["stop"], cv2.IMREAD_COLOR)
-    start_roi = cfg["rois"]["start"]
-    stop_roi = cfg["rois"]["stop"]
+    rois = cfg.get("rois", {})
+    start_roi_cfg = rois.get("start")
+    stop_roi_cfg = rois.get("stop")
     threshold_start = cfg.get("thresholds", {}).get("start", 0.8)
     threshold_stop = cfg.get("thresholds", {}).get("stop", 0.8)
 
@@ -73,10 +104,18 @@ def detect_segments(video_path: str | Path, cfg: dict, out_json: str | Path, deb
     frame_idx = 0
     dbg = ensure_dir(debug_dir) if debug_dir else None
 
+    start_roi: list[int] | None = None
+    stop_roi: list[int] | None = None
+
     while True:
         ok, frame = cap.read()
         if not ok:
             break
+        if frame_idx == 0:
+            start_roi = _resolve_search_rect(frame, start_roi_cfg, "start")
+            stop_roi = _resolve_search_rect(frame, stop_roi_cfg, "stop")
+            _validate_match_inputs(frame, start_roi, start_tpl, "start")
+            _validate_match_inputs(frame, stop_roi, stop_tpl, "stop")
         s_score = _template_score(_roi(frame, start_roi), start_tpl)
         e_score = _template_score(_roi(frame, stop_roi), stop_tpl)
         _, seg = machine.update(t_s=t_s, dt_s=dt_s, start_hit=s_score >= threshold_start, stop_hit=e_score >= threshold_stop)
