@@ -56,3 +56,6 @@ ocr:
 monitoring:
   segment_progress_interval_s: 10.0
   render_progress_interval_s: 5.0
+
+processing:
+  output_fps: 10

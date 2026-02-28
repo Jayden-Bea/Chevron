@@ -40,6 +40,7 @@ pip install -e .[dev]
   - Set `segment.match_length_s` to control how long Chevron records after each detected cue.
 - Set crop rectangles (or use `split` preview helper).
 - Add calibration correspondences for each camera view.
+- Set `processing.output_fps` (recommended `10`) to control proxy/raw/render output frame rate.
 
 2) Run the full pipeline:
 
@@ -87,6 +88,11 @@ What the verifier shows:
 - **Image-space calibration points** can be any arbitrary quadrilateral or scattered points sampled on the carpet plane; they do not need to form an axis-aligned rectangle.
 - **Destination field points** are typically laid out on a rectangular top-down canvas because that is the canonical render coordinate system.
 
+
+## Frame-rate control
+
+Set `processing.output_fps` in your config (e.g. `10`) to control the ingest proxy FPS, raw match clip FPS, and top-down render FPS. This reduces runtime, compute, and storage for high-frame-rate source VODs.
+
 ## Outputs
 
 Per match:
@@ -101,7 +107,8 @@ Raw extracted source clips before top-down rendering:
 - `matches_raw/match_<n>.mp4`
 - `matches_raw/matches_raw.json`
 
-- `chevron run` writes progress checkpoints to `out_dir/workdir/run_status.json` (ingest/segment/calibrate/render stage updates, including per-match render progress).
+- `chevron run` writes progress checkpoints to `out_dir/workdir/run_status.json` (ingest/segment/verify/calibrate/render stage updates, including per-match render progress).
+- After segmentation, `chevron run` automatically launches `chevron verify` so users can edit image/field correspondences before calibration and render.
 - Optional monitoring knobs in config: `monitoring.segment_progress_interval_s` and `monitoring.render_progress_interval_s` (seconds).
 - `chevron run` defaults to `--resume`, so if `workdir/ingest_meta.json` + proxy already exist, ingest is reused instead of re-running.
 - On resumed runs, already-rendered match outputs are detected (`match_<n>/topdown.mp4` + `match_meta.json`) and skipped; only missing matches are rendered.
@@ -134,4 +141,3 @@ Debug artifacts:
   - verify field coordinate units and `px_per_unit`.
 - **Edges ghosting in composite**:
   - tune masks/priority strategy (current implementation uses simple feather blend).
-

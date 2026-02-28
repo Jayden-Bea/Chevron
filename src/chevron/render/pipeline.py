@@ -19,13 +19,19 @@ def render_matches(
     calib: dict,
     cfg: dict,
     out_dir: str | Path,
+    output_fps: float | None = None,
     progress_interval_s: float = 5.0,
     progress_callback=None,
     skip_existing: bool = True,
 ) -> list[str]:
     out = ensure_dir(out_dir)
     cap = cv2.VideoCapture(video_path)
-    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    source_fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+    if output_fps and output_fps > 0:
+        frame_step = max(1, int(round(source_fps / float(output_fps))))
+    else:
+        frame_step = 1
+    fps = source_fps / frame_step
     width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
     height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     layout = get_layout(cfg, width, height)
@@ -40,9 +46,9 @@ def render_matches(
         match_dir = ensure_dir(out / f"match_{i:03d}")
         output_path = match_dir / "topdown.mp4"
         meta_path = match_dir / "match_meta.json"
-        start_idx = int(seg["start_time_s"] * fps)
-        end_idx = int(seg["end_time_s"] * fps)
-        total_match_frames = max(end_idx - start_idx, 0)
+        start_idx = int(seg["start_time_s"] * source_fps)
+        end_idx = int(seg["end_time_s"] * source_fps)
+        total_match_frames = max((end_idx - start_idx + frame_step - 1) // frame_step, 0)
         frame_log_interval = max(1, int(round(safe_interval_s * fps)))
 
         if skip_existing and output_path.exists() and meta_path.exists() and output_path.stat().st_size > 0:
@@ -77,7 +83,9 @@ def render_matches(
             )
 
         frame_meta = []
-        for frame_idx in range(start_idx, end_idx):
+        output_frame_idx = 0
+        for frame_idx in range(start_idx, end_idx, frame_step):
+            cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
             ok, frame = cap.read()
             if not ok:
                 break
@@ -91,26 +99,28 @@ def render_matches(
                 masks.append(mask)
             stitched = blend_layers(layers, masks)
             writer.write(stitched)
-            frame_meta.append({"frame_idx": frame_idx - start_idx, "t_video_s": frame_idx / fps, "t_match_s": None})
+            frame_meta.append({"frame_idx": output_frame_idx, "t_video_s": frame_idx / source_fps, "t_match_s": None})
 
-            if progress_callback and ((frame_idx - start_idx) % frame_log_interval == 0):
+            if progress_callback and (output_frame_idx % frame_log_interval == 0):
                 progress_callback(
                     {
                         "event": "match_progress",
                         "match_index": i,
                         "total_matches": len(segments),
-                        "match_frame_idx": frame_idx - start_idx,
+                        "match_frame_idx": output_frame_idx,
                         "match_total_frames": total_match_frames,
                         "video_frame_idx": frame_idx,
-                        "video_time_s": round(frame_idx / fps, 3),
+                        "video_time_s": round(frame_idx / source_fps, 3),
                     }
                 )
+            output_frame_idx += 1
         writer.close()
 
         meta = {
             "src_vod_start_s": seg["start_time_s"],
             "src_vod_end_s": seg["end_time_s"],
             "fps": fps,
+            "source_fps": source_fps,
             "frame_count": len(frame_meta),
             "frames": frame_meta,
             "config_hash": stable_hash(cfg),
