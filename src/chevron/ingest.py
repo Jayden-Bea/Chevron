@@ -36,6 +36,11 @@ def _download_youtube(url: str, cache_dir: Path) -> Path:
         try:
             subprocess.run(cmd, check=True, text=True, capture_output=True)
             break
+        except FileNotFoundError as err:
+            raise RuntimeError(
+                "yt-dlp is required for URL ingestion but was not found on PATH. "
+                "Install yt-dlp and retry, or use --video with a local file."
+            ) from err
         except subprocess.CalledProcessError as err:
             message = "\n".join([err.stdout or "", err.stderr or ""])
             is_last_client = idx == len(client_settings) - 1
