@@ -445,7 +445,12 @@ def build_parser():
     s.add_argument("--fps", type=int, default=30)
     s.add_argument("--resume", dest="resume", action="store_true")
     s.add_argument("--no-resume", dest="resume", action="store_false")
+    s.add_argument("--verify-port", type=int, default=8501)
+    s.add_argument("--verify-host", default="127.0.0.1")
+    s.add_argument("--verify-browser", dest="verify_browser", action="store_true")
+    s.add_argument("--no-verify-browser", dest="verify_browser", action="store_false")
     s.set_defaults(resume=True)
+    s.set_defaults(verify_browser=True)
     s.set_defaults(func=cmd_run)
     return p
 
