@@ -271,6 +271,15 @@ def main(argv: list[str] | None = None) -> None:
 
     st.title("Chevron Config Verifier")
     st.caption("Tip: use the ingest proxy video for fast, smooth scrubbing.")
+    st.info(
+        """
+**How to pick calibration points (before rendering):**
+- **Image points** are pixel coordinates on each camera crop (top / bottom_left / bottom_right). Pick points on the *field plane* (tape intersections, corners, marked vertices) and avoid robots/occlusions.
+- **Field points** are the matching coordinates on the top-down field canvas (same real-world locations as the image points).
+- Add at least **4 well-spread point pairs per view**, keeping the order aligned between image and field lists.
+- After adjusting points, run calibration to generate `calib.json`, then continue rendering.
+        """
+    )
 
     st.sidebar.header("Controls")
     frame_idx = st.sidebar.slider("Frame", min_value=0, max_value=max(reader.frame_count - 1, 0), value=int(np.clip(args.frame, 0, max(reader.frame_count - 1, 0))))
