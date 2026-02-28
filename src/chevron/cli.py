@@ -4,6 +4,7 @@ import argparse
 import subprocess
 import sys
 from pathlib import Path
+from time import time
 
 from .calib.homography import compute_homography
 from .calib.manual_click import extract_view_frames
@@ -19,6 +20,24 @@ from .utils.io import ensure_dir, read_json, write_json
 def cmd_ingest(args):
     ingest(url=args.url, video=args.video, out_dir=args.out, fps=args.fps)
 
+
+
+def _write_run_status(path: Path, stage: str, details: dict | None = None) -> None:
+    payload = {"stage": stage, "updated_unix_s": time()}
+    if details:
+        payload["details"] = details
+    write_json(path, payload)
+
+
+def _load_existing_ingest_meta(workdir: Path) -> dict | None:
+    ingest_meta_path = workdir / "ingest_meta.json"
+    if not ingest_meta_path.exists():
+        return None
+    meta = read_json(ingest_meta_path)
+    proxy = Path(meta.get("proxy", ""))
+    if not proxy.exists():
+        return None
+    return meta
 
 def cmd_segment(args):
     cfg = load_config(args.config)
@@ -104,19 +123,35 @@ def cmd_verify(args):
 def cmd_run(args):
     work = ensure_dir(args.out)
     cfg = load_config(args.config)
-    ingest_meta = ingest(url=args.url, video=args.video, out_dir=work / "workdir", fps=args.fps)
-    proxy = ingest_meta["proxy"]
-    segments_path = work / "workdir" / "segments.json"
-    detect_segments(proxy, cfg, segments_path, debug_dir=work / "workdir" / "segment_debug")
+    workdir = ensure_dir(work / "workdir")
+    run_status_path = workdir / "run_status.json"
 
-    calib_out = work / "workdir" / "calib"
+    _write_run_status(run_status_path, "ingest_starting", {"resume": bool(args.resume)})
+    ingest_meta = _load_existing_ingest_meta(workdir) if args.resume else None
+    if ingest_meta is None:
+        ingest_meta = ingest(url=args.url, video=args.video, out_dir=workdir, fps=args.fps)
+        _write_run_status(run_status_path, "ingest_complete", {"proxy": ingest_meta.get("proxy")})
+    else:
+        _write_run_status(run_status_path, "ingest_reused", {"proxy": ingest_meta.get("proxy")})
+
+    proxy = ingest_meta["proxy"]
+    segments_path = workdir / "segments.json"
+    _write_run_status(run_status_path, "segment_starting", {"video": proxy})
+    detect_segments(proxy, cfg, segments_path, debug_dir=workdir / "segment_debug")
+    _write_run_status(run_status_path, "segment_complete", {"segments": str(segments_path)})
+
+    calib_out = workdir / "calib"
+    _write_run_status(run_status_path, "calibrate_starting", {"out": str(calib_out)})
     namespace = argparse.Namespace(video=proxy, config=args.config, out=calib_out)
     cmd_calibrate(namespace)
     calib_path = calib_out / "calib.json"
+    _write_run_status(run_status_path, "calibrate_complete", {"calib": str(calib_path)})
 
     seg = read_json(segments_path)["segments"]
     calib = read_json(calib_path)
+    _write_run_status(run_status_path, "render_starting", {"matches_out": str(work / "matches")})
     render_matches(proxy, seg, calib, cfg, work / "matches")
+    _write_run_status(run_status_path, "render_complete")
 
 
 def build_parser():
@@ -176,6 +211,9 @@ def build_parser():
     s.add_argument("--config", required=True)
     s.add_argument("--out", required=True)
     s.add_argument("--fps", type=int, default=30)
+    s.add_argument("--resume", dest="resume", action="store_true")
+    s.add_argument("--no-resume", dest="resume", action="store_false")
+    s.set_defaults(resume=True)
     s.set_defaults(func=cmd_run)
     return p
 
