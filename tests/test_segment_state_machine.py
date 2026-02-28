@@ -89,3 +89,47 @@ def test_fit_template_to_image_downscales_when_needed():
     h, w = fitted.shape[:2]
     assert h <= 80
     assert w <= 200
+
+
+def test_detect_segments_reports_progress_callback(tmp_path):
+    import cv2
+    from chevron.segment.detector import detect_segments
+
+    video_path = tmp_path / "input.mp4"
+    writer = cv2.VideoWriter(
+        str(video_path),
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        10.0,
+        (32, 32),
+    )
+    for _ in range(12):
+        writer.write(np.zeros((32, 32, 3), dtype=np.uint8))
+    writer.release()
+
+    start_tpl_path = tmp_path / "start.png"
+    stop_tpl_path = tmp_path / "stop.png"
+    cv2.imwrite(str(start_tpl_path), np.zeros((8, 8, 3), dtype=np.uint8))
+    cv2.imwrite(str(stop_tpl_path), np.zeros((8, 8, 3), dtype=np.uint8))
+
+    cfg = {
+        "templates": {"start": str(start_tpl_path), "stop": str(stop_tpl_path)},
+        "thresholds": {"start": 2.0, "stop": 2.0},
+        "debounce": {"min_start_s": 5.0, "min_stop_s": 5.0, "min_match_s": 10.0, "max_match_s": 20.0},
+    }
+
+    progress = []
+    out_json = tmp_path / "segments.json"
+    segments = detect_segments(
+        video_path,
+        cfg,
+        out_json,
+        progress_interval_s=0.25,
+        progress_callback=progress.append,
+    )
+
+    assert segments == []
+    assert progress
+    assert progress[0]["frame_idx"] == 0
+    assert progress[0]["total_frames"] >= 1
+    assert "start_score" in progress[0]
+    assert "stop_score" in progress[0]

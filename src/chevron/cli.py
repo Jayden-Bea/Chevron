@@ -14,6 +14,26 @@ def _log(message: str) -> None:
     print(message, flush=True)
 
 
+def _format_segment_progress(details: dict) -> str:
+    total_frames = details.get("total_frames", 0) or 0
+    frame_idx = details.get("frame_idx", 0)
+    if total_frames > 0:
+        pct = max(0.0, min(100.0, (frame_idx / total_frames) * 100.0))
+        progress = f"{frame_idx}/{total_frames} ({pct:.1f}%)"
+    else:
+        progress = f"{frame_idx} frames"
+
+    return (
+        "[chevron] run: segment progress "
+        f"t={details.get('time_s', 0.0):.1f}s "
+        f"frame={progress} "
+        f"state={details.get('state')} "
+        f"scores(start={details.get('start_score', 0.0):.3f}, stop={details.get('stop_score', 0.0):.3f}) "
+        f"hits(start={details.get('start_hit')}, stop={details.get('stop_hit')}) "
+        f"segments={details.get('segments_found', 0)}"
+    )
+
+
 def cmd_ingest(args):
     from .ingest import ingest
 
@@ -45,7 +65,18 @@ def cmd_segment(args):
 
     cfg = load_config(args.config)
     _log("[chevron] segment: starting")
-    detect_segments(args.video, cfg, args.out, debug_dir=Path(args.out).with_suffix("").as_posix() + "_debug")
+
+    def _on_progress(details: dict) -> None:
+        _log(_format_segment_progress(details))
+
+    detect_segments(
+        args.video,
+        cfg,
+        args.out,
+        debug_dir=Path(args.out).with_suffix("").as_posix() + "_debug",
+        progress_interval_s=cfg.get("monitoring", {}).get("segment_progress_interval_s", 10.0),
+        progress_callback=_on_progress,
+    )
     _log("[chevron] segment: complete")
 
 
@@ -160,7 +191,19 @@ def cmd_run(args):
     from .segment.detector import detect_segments
 
     _write_run_status(run_status_path, "segment_starting", {"video": proxy})
-    detect_segments(proxy, cfg, segments_path, debug_dir=workdir / "segment_debug")
+
+    def _on_segment_progress(details: dict) -> None:
+        _log(_format_segment_progress(details))
+        _write_run_status(run_status_path, "segment_running", details)
+
+    detect_segments(
+        proxy,
+        cfg,
+        segments_path,
+        debug_dir=workdir / "segment_debug",
+        progress_interval_s=cfg.get("monitoring", {}).get("segment_progress_interval_s", 10.0),
+        progress_callback=_on_segment_progress,
+    )
     _write_run_status(run_status_path, "segment_complete", {"segments": str(segments_path)})
 
     calib_out = workdir / "calib"
