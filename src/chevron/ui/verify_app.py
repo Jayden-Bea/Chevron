@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import argparse
+import copy
+import json
 from collections import OrderedDict
 from pathlib import Path
 from typing import Any
@@ -96,12 +98,30 @@ def draw_polygon(img: np.ndarray, pts4: list[list[float]] | np.ndarray) -> np.nd
     return out
 
 
-def compute_homographies(cfg: dict[str, Any], calib_data: dict[str, Any] | None) -> dict[str, np.ndarray]:
+def clone_correspondences(correspondences: dict[str, Any]) -> dict[str, dict[str, list[list[float]]]]:
+    out: dict[str, dict[str, list[list[float]]]] = {}
+    for view in VIEW_NAMES:
+        pairs = correspondences.get(view, {}) if isinstance(correspondences.get(view, {}), dict) else {}
+        img_pts = pairs.get("image_points", [])
+        fld_pts = pairs.get("field_points", [])
+        out[view] = {
+            "image_points": [[float(x), float(y)] for x, y in img_pts],
+            "field_points": [[float(x), float(y)] for x, y in fld_pts],
+        }
+    return out
+
+
+def compute_homographies(
+    cfg: dict[str, Any],
+    calib_data: dict[str, Any] | None,
+    correspondences: dict[str, dict[str, list[list[float]]]] | None = None,
+    prefer_correspondences: bool = False,
+) -> dict[str, np.ndarray]:
     hs: dict[str, np.ndarray] = {}
-    if calib_data and calib_data.get("homographies"):
+    if calib_data and calib_data.get("homographies") and not prefer_correspondences:
         hs.update({k: np.array(v, dtype=np.float32) for k, v in calib_data["homographies"].items()})
 
-    corr = (cfg.get("calibration") or {}).get("correspondences") or {}
+    corr = correspondences if correspondences is not None else (cfg.get("calibration") or {}).get("correspondences") or {}
     for view, pairs in corr.items():
         if view in hs:
             continue
@@ -115,6 +135,12 @@ def compute_homographies(cfg: dict[str, Any], calib_data: dict[str, Any] | None)
             hs[view] = compute_homography(image_points, field_points)
         except (ValueError, RuntimeError):
             continue
+
+    if calib_data and calib_data.get("homographies") and prefer_correspondences:
+        for view, h in calib_data["homographies"].items():
+            if view not in hs:
+                hs[view] = np.array(h, dtype=np.float32)
+
     return hs
 
 
@@ -219,8 +245,10 @@ def main(argv: list[str] | None = None) -> None:
     if calib_data and calib_data.get("correspondences"):
         correspondences.update(calib_data["correspondences"])
 
-    homographies = compute_homographies(cfg, calib_data)
-    canvas_size = compute_canvas_size(cfg, calib_data)
+    session_corr_key = f"editable_corr::{Path(args.config).resolve()}::{Path(args.video).resolve()}::{Path(args.calib).resolve() if args.calib else 'none'}"
+    if session_corr_key not in st.session_state:
+        st.session_state[session_corr_key] = clone_correspondences(correspondences)
+    editable_correspondences = st.session_state[session_corr_key]
 
     st.title("Chevron Config Verifier")
     st.caption("Tip: use the ingest proxy video for fast, smooth scrubbing.")
@@ -244,12 +272,86 @@ def main(argv: list[str] | None = None) -> None:
         ],
     )
 
+    st.sidebar.header("Calibration editor")
+    editor_view = st.sidebar.selectbox("Edit view", VIEW_NAMES, key="calib_editor_view")
+    point_space = st.sidebar.radio("Point space", ["image_points", "field_points"], horizontal=True)
+    active_points = editable_correspondences.setdefault(editor_view, {}).setdefault(point_space, [])
+    point_count = len(active_points)
+    if point_count:
+        point_idx = st.sidebar.slider("Point index", min_value=0, max_value=point_count - 1, value=0)
+        pt_x, pt_y = active_points[point_idx]
+        new_x = st.sidebar.number_input("Point x", value=float(pt_x), step=1.0)
+        new_y = st.sidebar.number_input("Point y", value=float(pt_y), step=1.0)
+        active_points[point_idx] = [float(new_x), float(new_y)]
+
+        nudge_col1, nudge_col2, nudge_col3, nudge_col4 = st.sidebar.columns(4)
+        nudge_step = st.sidebar.number_input("Nudge step", min_value=0.1, value=1.0, step=0.5)
+        if nudge_col1.button("←", use_container_width=True):
+            active_points[point_idx][0] -= float(nudge_step)
+            st.rerun()
+        if nudge_col2.button("→", use_container_width=True):
+            active_points[point_idx][0] += float(nudge_step)
+            st.rerun()
+        if nudge_col3.button("↑", use_container_width=True):
+            active_points[point_idx][1] -= float(nudge_step)
+            st.rerun()
+        if nudge_col4.button("↓", use_container_width=True):
+            active_points[point_idx][1] += float(nudge_step)
+            st.rerun()
+
+        if st.sidebar.button("Delete selected point"):
+            active_points.pop(point_idx)
+            st.rerun()
+    else:
+        st.sidebar.caption("No points in this set yet.")
+
+    add_default = [0.0, 0.0]
+    if active_points:
+        add_default = [float(active_points[-1][0]), float(active_points[-1][1])]
+    add_x = st.sidebar.number_input("New point x", value=float(add_default[0]), step=1.0)
+    add_y = st.sidebar.number_input("New point y", value=float(add_default[1]), step=1.0)
+    if st.sidebar.button("Add point"):
+        active_points.append([float(add_x), float(add_y)])
+        st.rerun()
+
+    if st.sidebar.button("Reset edits from config/calib"):
+        st.session_state[session_corr_key] = clone_correspondences(correspondences)
+        st.rerun()
+
+    export_payload = {
+        "calibration": {
+            "correspondences": copy.deepcopy(editable_correspondences),
+        }
+    }
+    st.sidebar.download_button(
+        "Download edited correspondences (json)",
+        data=json.dumps(export_payload, indent=2),
+        file_name="edited_correspondences.json",
+        mime="application/json",
+    )
+
+    has_calib_homographies = bool(calib_data and calib_data.get("homographies"))
+    use_edited_for_warp = st.sidebar.checkbox(
+        "preview_edited_correspondences_for_warp",
+        value=not has_calib_homographies,
+        help="When off, warp preview uses homographies from --calib (if available), matching render-time behavior.",
+    )
+
     show_rois = st.sidebar.checkbox("show_rois", value=True)
     show_crops = st.sidebar.checkbox("show_crops", value=True)
     show_calib_points = st.sidebar.checkbox("show_calib_points", value=True)
     show_calib_quad = st.sidebar.checkbox("show_calib_quad", value=True)
     show_warp = st.sidebar.checkbox("show_warp", value=True)
     show_metrics = st.sidebar.checkbox("show_metrics", value=True)
+
+    homography_correspondences = editable_correspondences if use_edited_for_warp else correspondences
+    homographies = compute_homographies(
+        cfg,
+        calib_data,
+        correspondences=homography_correspondences,
+        prefer_correspondences=use_edited_for_warp,
+    )
+    canvas_size = compute_canvas_size(cfg, calib_data)
 
     frame = reader.read_frame(frame_idx)
     display_broadcast = frame.copy()
@@ -262,7 +364,7 @@ def main(argv: list[str] | None = None) -> None:
     crop_displays = {k: v.copy() for k, v in crops.items()}
 
     for view in VIEW_NAMES:
-        pairs = correspondences.get(view, {})
+        pairs = editable_correspondences.get(view, {})
         pts = pairs.get("image_points", [])
         if show_calib_points and view in crop_displays:
             crop_displays[view] = draw_points(crop_displays[view], pts, label=view)
@@ -275,12 +377,12 @@ def main(argv: list[str] | None = None) -> None:
             if view not in crops or view not in homographies:
                 continue
             warped[view] = warp_to_canvas(crops[view], homographies[view], canvas_size)
-            pairs = correspondences.get(view, {})
+            pairs = editable_correspondences.get(view, {})
             if show_calib_points:
                 warped_points = pairs.get("field_points", [])
                 warped[view] = draw_points(warped[view], warped_points, label=f"{view}_field")
             if show_calib_quad:
-                warped[view] = draw_polygon(warped[view], correspondences.get(view, {}).get("field_points", []))
+                warped[view] = draw_polygon(warped[view], pairs.get("field_points", []))
 
     stitched = build_composite(warped) if show_warp else None
 
@@ -305,7 +407,7 @@ def main(argv: list[str] | None = None) -> None:
 
     if show_metrics:
         st.subheader("Reprojection metrics (top-down pixels)")
-        metrics = compute_reprojection_metrics(correspondences, homographies)
+        metrics = compute_reprojection_metrics(editable_correspondences, homographies)
         if metrics:
             st.table(metrics)
         else:
@@ -323,6 +425,8 @@ def main(argv: list[str] | None = None) -> None:
                 "layout": layout,
                 "rois": rois,
                 "canvas_size": {"width_px": canvas_size[0], "height_px": canvas_size[1]},
+                "editable_correspondences": editable_correspondences,
+                "warp_preview_uses_edited_correspondences": use_edited_for_warp,
             }
         )
 

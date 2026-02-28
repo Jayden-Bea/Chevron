@@ -8,10 +8,45 @@ from .utils.ffmpeg import normalize_video
 from .utils.io import ensure_dir, write_json
 
 
+def _is_retryable_ytdlp_error(message: str) -> bool:
+    lowered = message.lower()
+    is_403 = "403" in lowered and "forbidden" in lowered
+    is_outdated_client = "youtube client outdated" in lowered
+    return is_403 or is_outdated_client
+
+
 def _download_youtube(url: str, cache_dir: Path) -> Path:
     cache_dir.mkdir(parents=True, exist_ok=True)
     output_tmpl = str(cache_dir / "%(id)s.%(ext)s")
-    subprocess.run(["yt-dlp", "-o", output_tmpl, url], check=True)
+
+    client_settings = [
+        None,
+        "android",
+        "web",
+        "ios",
+        "tv_embedded",
+    ]
+
+    for idx, client in enumerate(client_settings):
+        cmd = ["yt-dlp", "-o", output_tmpl]
+        if client is not None:
+            cmd.extend(["--extractor-args", f"youtube:player_client={client}"])
+        cmd.append(url)
+
+        try:
+            subprocess.run(cmd, check=True, text=True, capture_output=True)
+            break
+        except subprocess.CalledProcessError as err:
+            message = "\n".join([err.stdout or "", err.stderr or ""])
+            is_last_client = idx == len(client_settings) - 1
+            if _is_retryable_ytdlp_error(message) and not is_last_client:
+                continue
+            if _is_retryable_ytdlp_error(message) and is_last_client:
+                raise RuntimeError(
+                    "yt-dlp could not download the URL after trying multiple YouTube clients"
+                ) from err
+            raise
+
     latest = max(cache_dir.glob("*"), key=lambda p: p.stat().st_mtime)
     return latest
 

@@ -143,3 +143,23 @@ def test_compute_homographies_merges_calib_with_config_fallbacks():
     assert "bottom_left" in hs
     assert hs["top"].shape == (3, 3)
     assert hs["bottom_left"].shape == (3, 3)
+
+
+def test_compute_homographies_prefers_calib_when_not_preferring_correspondences():
+    cfg = {"calibration": {"correspondences": {}}}
+    calib_data = {"homographies": {"top": [[2, 0, 0], [0, 2, 0], [0, 0, 1]]}}
+    edited_corr = {
+        "top": {
+            "image_points": [[0, 0], [1, 0], [1, 1], [0, 1]],
+            "field_points": [[0, 0], [4, 0], [4, 4], [0, 4]],
+        }
+    }
+
+    hs = compute_homographies(
+        cfg,
+        calib_data=calib_data,
+        correspondences=edited_corr,
+        prefer_correspondences=False,
+    )
+
+    np.testing.assert_allclose(hs["top"], np.array([[2, 0, 0], [0, 2, 0], [0, 0, 1]], dtype=np.float32))
