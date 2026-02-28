@@ -6,19 +6,20 @@ import sys
 from pathlib import Path
 from time import time
 
-from .calib.homography import compute_homography
-from .calib.manual_click import extract_view_frames
-from .ingest import ingest
-from .render.pipeline import render_matches
-from .segment.detector import detect_segments
-from .split.layout import get_layout
-from .split.tools import export_layout_preview
 from .utils.config import load_config
 from .utils.io import ensure_dir, read_json, write_json
 
 
+def _log(message: str) -> None:
+    print(message, flush=True)
+
+
 def cmd_ingest(args):
+    from .ingest import ingest
+
+    _log("[chevron] ingest: starting")
     ingest(url=args.url, video=args.video, out_dir=args.out, fps=args.fps)
+    _log("[chevron] ingest: complete")
 
 
 
@@ -40,12 +41,18 @@ def _load_existing_ingest_meta(workdir: Path) -> dict | None:
     return meta
 
 def cmd_segment(args):
+    from .segment.detector import detect_segments
+
     cfg = load_config(args.config)
+    _log("[chevron] segment: starting")
     detect_segments(args.video, cfg, args.out, debug_dir=Path(args.out).with_suffix("").as_posix() + "_debug")
+    _log("[chevron] segment: complete")
 
 
 def cmd_split(args):
     import cv2
+    from .split.layout import get_layout
+    from .split.tools import export_layout_preview
 
     cfg = load_config(args.config)
     cap = cv2.VideoCapture(args.video)
@@ -58,9 +65,13 @@ def cmd_split(args):
     out = ensure_dir(args.out)
     write_json(out / "crops.json", layout)
     export_layout_preview(args.video, layout, out / "layout_preview.png")
+    _log("[chevron] split: complete")
 
 
 def cmd_calibrate(args):
+    from .calib.homography import compute_homography
+    from .calib.manual_click import extract_view_frames
+
     cfg = load_config(args.config)
     crops = cfg["split"]["crops"]
     out = ensure_dir(args.out)
@@ -83,13 +94,17 @@ def cmd_calibrate(args):
         "homographies": homographies,
     }
     write_json(out / "calib.json", calib)
+    _log("[chevron] calibrate: complete")
 
 
 def cmd_render(args):
+    from .render.pipeline import render_matches
+
     seg = read_json(args.segments)["segments"]
     calib = read_json(args.calib)
     cfg = load_config(args.config)
     render_matches(args.video, seg, calib, cfg, args.out)
+    _log("[chevron] render: complete")
 
 
 
@@ -121,26 +136,35 @@ def cmd_verify(args):
     subprocess.run(cmd, check=True)
 
 def cmd_run(args):
+    from .ingest import ingest
+
     work = ensure_dir(args.out)
     cfg = load_config(args.config)
     workdir = ensure_dir(work / "workdir")
     run_status_path = workdir / "run_status.json"
 
+    _log(f"[chevron] run: writing status to {run_status_path}")
     _write_run_status(run_status_path, "ingest_starting", {"resume": bool(args.resume)})
     ingest_meta = _load_existing_ingest_meta(workdir) if args.resume else None
     if ingest_meta is None:
+        _log("[chevron] run: ingest stage")
         ingest_meta = ingest(url=args.url, video=args.video, out_dir=workdir, fps=args.fps)
         _write_run_status(run_status_path, "ingest_complete", {"proxy": ingest_meta.get("proxy")})
     else:
+        _log("[chevron] run: reusing previous ingest output")
         _write_run_status(run_status_path, "ingest_reused", {"proxy": ingest_meta.get("proxy")})
 
     proxy = ingest_meta["proxy"]
     segments_path = workdir / "segments.json"
+    _log("[chevron] run: segment stage")
+    from .segment.detector import detect_segments
+
     _write_run_status(run_status_path, "segment_starting", {"video": proxy})
     detect_segments(proxy, cfg, segments_path, debug_dir=workdir / "segment_debug")
     _write_run_status(run_status_path, "segment_complete", {"segments": str(segments_path)})
 
     calib_out = workdir / "calib"
+    _log("[chevron] run: calibrate stage")
     _write_run_status(run_status_path, "calibrate_starting", {"out": str(calib_out)})
     namespace = argparse.Namespace(video=proxy, config=args.config, out=calib_out)
     cmd_calibrate(namespace)
@@ -149,9 +173,13 @@ def cmd_run(args):
 
     seg = read_json(segments_path)["segments"]
     calib = read_json(calib_path)
+    _log("[chevron] run: render stage")
+    from .render.pipeline import render_matches
+
     _write_run_status(run_status_path, "render_starting", {"matches_out": str(work / "matches")})
     render_matches(proxy, seg, calib, cfg, work / "matches")
     _write_run_status(run_status_path, "render_complete")
+    _log("[chevron] run: complete")
 
 
 def build_parser():
@@ -221,7 +249,11 @@ def build_parser():
 def main():
     parser = build_parser()
     args = parser.parse_args()
-    args.func(args)
+    try:
+        args.func(args)
+    except Exception as exc:
+        print(f"[chevron] error: {exc}", file=sys.stderr, flush=True)
+        raise SystemExit(1) from exc
 
 
 if __name__ == "__main__":

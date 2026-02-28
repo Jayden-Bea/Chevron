@@ -74,3 +74,13 @@ def test_download_youtube_raises_runtime_error_after_exhausting_retryable_client
         _download_youtube("https://youtube.com/watch?v=abc123", tmp_path)
 
     assert len(calls) == 5
+
+
+def test_download_youtube_raises_runtime_error_when_ytdlp_missing(monkeypatch, tmp_path: Path):
+    def fake_run(cmd, check, text, capture_output):
+        raise FileNotFoundError("yt-dlp")
+
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError, match="yt-dlp is required"):
+        _download_youtube("https://youtube.com/watch?v=abc123", tmp_path)
