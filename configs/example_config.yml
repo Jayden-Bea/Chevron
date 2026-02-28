@@ -41,11 +41,11 @@ calibration:
 segment:
   # template (legacy): start/stop image matching inside ROIs
   # audio_cue: detect starts by matching a horn/audio cue, then cut fixed-length matches
-  mode: template
-  match_length_s: 150.0
+  mode: audio_cue
+  match_length_s: 155.0
 audio_cue:
   # user-provided horn/queue clip (repo does not ship binary audio assets)
-  template: configs/templates/horn.wav
+  template: configs/templates/match_start.wav
   sample_rate_hz: 16000
   threshold: 0.45
   min_separation_s: 60.0
