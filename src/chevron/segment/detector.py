@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import cv2
 
@@ -131,10 +132,18 @@ def _template_score(img, template, scale_factors: list[float] | None = None):
     return best
 
 
-def detect_segments(video_path: str | Path, cfg: dict, out_json: str | Path, debug_dir: str | Path | None = None) -> list[dict]:
+def detect_segments(
+    video_path: str | Path,
+    cfg: dict,
+    out_json: str | Path,
+    debug_dir: str | Path | None = None,
+    progress_interval_s: float = 10.0,
+    progress_callback: Callable[[dict], None] | None = None,
+) -> list[dict]:
     cap = cv2.VideoCapture(str(video_path))
     fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     dt_s = 1.0 / fps
+    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
     start_tpl = cv2.imread(cfg["templates"]["start"], cv2.IMREAD_COLOR)
     stop_tpl = cv2.imread(cfg["templates"]["stop"], cv2.IMREAD_COLOR)
@@ -153,6 +162,7 @@ def detect_segments(video_path: str | Path, cfg: dict, out_json: str | Path, deb
     t_s = 0.0
     frame_idx = 0
     dbg = ensure_dir(debug_dir) if debug_dir else None
+    last_progress_log_s = -float(progress_interval_s)
 
     start_roi: list[int] | None = None
     stop_roi: list[int] | None = None
@@ -168,7 +178,26 @@ def detect_segments(video_path: str | Path, cfg: dict, out_json: str | Path, deb
             _validate_match_inputs(frame, stop_roi, stop_tpl, "stop")
         s_score = _template_score(_roi(frame, start_roi), start_tpl, scale_factors=scale_factors)
         e_score = _template_score(_roi(frame, stop_roi), stop_tpl, scale_factors=scale_factors)
-        _, seg = machine.update(t_s=t_s, dt_s=dt_s, start_hit=s_score >= threshold_start, stop_hit=e_score >= threshold_stop)
+        start_hit = s_score >= threshold_start
+        stop_hit = e_score >= threshold_stop
+        state, seg = machine.update(t_s=t_s, dt_s=dt_s, start_hit=start_hit, stop_hit=stop_hit)
+
+        if progress_callback and t_s - last_progress_log_s >= progress_interval_s:
+            progress_callback(
+                {
+                    "frame_idx": frame_idx,
+                    "time_s": round(t_s, 3),
+                    "fps": round(fps, 3),
+                    "total_frames": total_frames,
+                    "state": state,
+                    "start_score": round(float(s_score), 4),
+                    "stop_score": round(float(e_score), 4),
+                    "start_hit": start_hit,
+                    "stop_hit": stop_hit,
+                    "segments_found": len(segments),
+                }
+            )
+            last_progress_log_s = t_s
         if dbg and frame_idx % int(fps * 5) == 0:
             cv2.imwrite(str(dbg / f"score_{frame_idx:06d}.jpg"), frame)
         if seg:
