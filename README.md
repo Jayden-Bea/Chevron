@@ -28,6 +28,7 @@ pip install -e .[dev]
 1) Edit `configs/example_config.yml` for your event:
 - Set ROI rectangles for start/stop/clock overlays.
 - `start.png` and `stop.png` are matched *inside* those ROIs (or inside the full frame if `rois.start`/`rois.stop` are omitted).
+- Matches are similarity-based (not exact-pixel-equality); if a template is larger than the ROI, Chevron auto-downscales it to fit before matching. Tune `thresholds.start/stop` and optional `matching.template_scale_tolerance_pct` (e.g. `1.0`) for slight overlay size drift.
 - Replace template image paths with screenshots from your broadcast.
 - Add your own `configs/templates/start.png` and `configs/templates/stop.png` (not bundled in-repo).
 - Set crop rectangles (or use `split` preview helper).
@@ -69,6 +70,7 @@ What the verifier shows:
 - Broadcast frame with ROI + crop overlays.
 - Per-view crops (`top`, `bottom_left`, `bottom_right`) with optional calibration points.
 - Live calibration editing in the sidebar (adjust `image_points`/`field_points`, nudge points, add/delete points, and download edited correspondences JSON).
+- Warp preview defaults to calibration-file homographies when `--calib` is provided; enable `preview_edited_correspondences_for_warp` in the sidebar to preview edited points directly.
 - Calibration visualization as points (all correspondences) and as a quadrilateral polygon (first 4 points connected in order).
 - Warped top-down view per crop and stitched composite preview when homographies are available.
 - Reprojection metrics (`avg`, `median`, `p95`) in top-down pixels.

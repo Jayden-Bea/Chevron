@@ -330,6 +330,13 @@ def main(argv: list[str] | None = None) -> None:
         mime="application/json",
     )
 
+    has_calib_homographies = bool(calib_data and calib_data.get("homographies"))
+    use_edited_for_warp = st.sidebar.checkbox(
+        "preview_edited_correspondences_for_warp",
+        value=not has_calib_homographies,
+        help="When off, warp preview uses homographies from --calib (if available), matching render-time behavior.",
+    )
+
     show_rois = st.sidebar.checkbox("show_rois", value=True)
     show_crops = st.sidebar.checkbox("show_crops", value=True)
     show_calib_points = st.sidebar.checkbox("show_calib_points", value=True)
@@ -337,11 +344,12 @@ def main(argv: list[str] | None = None) -> None:
     show_warp = st.sidebar.checkbox("show_warp", value=True)
     show_metrics = st.sidebar.checkbox("show_metrics", value=True)
 
+    homography_correspondences = editable_correspondences if use_edited_for_warp else correspondences
     homographies = compute_homographies(
         cfg,
         calib_data,
-        correspondences=editable_correspondences,
-        prefer_correspondences=True,
+        correspondences=homography_correspondences,
+        prefer_correspondences=use_edited_for_warp,
     )
     canvas_size = compute_canvas_size(cfg, calib_data)
 
@@ -418,6 +426,7 @@ def main(argv: list[str] | None = None) -> None:
                 "rois": rois,
                 "canvas_size": {"width_px": canvas_size[0], "height_px": canvas_size[1]},
                 "editable_correspondences": editable_correspondences,
+                "warp_preview_uses_edited_correspondences": use_edited_for_warp,
             }
         )
 
