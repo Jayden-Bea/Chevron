@@ -3,6 +3,7 @@ import numpy as np
 from chevron.segment.detector import (
     SegmentStateMachine,
     _build_template_scale_factors,
+    _find_audio_cue_times,
     _resolve_search_rect,
     _validate_match_inputs,
 )
@@ -133,3 +134,49 @@ def test_detect_segments_reports_progress_callback(tmp_path):
     assert progress[0]["total_frames"] >= 1
     assert "start_score" in progress[0]
     assert "stop_score" in progress[0]
+
+
+def test_find_audio_cue_times_finds_embedded_cues_with_noise():
+    sample_rate_hz = 16000
+    cue_t = np.linspace(0, 0.5, int(sample_rate_hz * 0.5), endpoint=False)
+    cue = (0.6 * np.sin(2 * np.pi * 880 * cue_t)).astype(np.float32)
+
+    program = np.random.default_rng(0).normal(0, 0.04, size=int(sample_rate_hz * 6.0)).astype(np.float32)
+    first = int(1.0 * sample_rate_hz)
+    second = int(4.0 * sample_rate_hz)
+    program[first : first + cue.size] += cue
+    program[second : second + cue.size] += cue
+
+    hits = _find_audio_cue_times(
+        program_audio=program,
+        cue_audio=cue,
+        sample_rate_hz=sample_rate_hz,
+        threshold=0.30,
+        min_separation_s=2.0,
+    )
+
+    assert len(hits) == 2
+    assert abs(hits[0][0] - 1.0) < 0.3
+    assert abs(hits[1][0] - 4.0) < 0.3
+
+
+def test_find_audio_cue_times_respects_minimum_separation():
+    sample_rate_hz = 16000
+    cue_t = np.linspace(0, 0.4, int(sample_rate_hz * 0.4), endpoint=False)
+    cue = (0.7 * np.sin(2 * np.pi * 1200 * cue_t)).astype(np.float32)
+
+    program = np.zeros(int(sample_rate_hz * 3.0), dtype=np.float32)
+    start_a = int(0.8 * sample_rate_hz)
+    start_b = int(1.2 * sample_rate_hz)
+    program[start_a : start_a + cue.size] += cue
+    program[start_b : start_b + cue.size] += cue
+
+    hits = _find_audio_cue_times(
+        program_audio=program,
+        cue_audio=cue,
+        sample_rate_hz=sample_rate_hz,
+        threshold=0.30,
+        min_separation_s=1.0,
+    )
+
+    assert len(hits) == 1
