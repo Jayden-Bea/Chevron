@@ -92,6 +92,10 @@ def run_local_verify(video: str, config: str, out_json: str | Path, frame_idx: i
         while True:
             crop_display = _draw_points(crop, image_points, (0, 255, 255), "i")
             field_display = _draw_points(field_canvas, field_points, (255, 180, 0), "f")
+            if pending_image_point is not None:
+                pending_pt = (int(round(pending_image_point[0])), int(round(pending_image_point[1])))
+                cv2.circle(crop_display, pending_pt, 6, (0, 0, 255), 2)
+                cv2.putText(crop_display, "pending", (pending_pt[0] + 6, pending_pt[1] + 14), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (0, 0, 255), 1)
             status = f"view={view} pairs={min(len(image_points), len(field_points))} pending={'yes' if pending_image_point else 'no'}"
             cv2.putText(crop_display, status, (12, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 0), 2)
             cv2.putText(field_display, status, (12, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 0), 2)

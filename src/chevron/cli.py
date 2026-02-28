@@ -335,19 +335,40 @@ def cmd_run(args):
         progress_interval_s=cfg.get("monitoring", {}).get("segment_progress_interval_s", 10.0),
         progress_callback=_on_segment_progress,
     )
+    segment_payload = read_json(segments_path)
+    segments = segment_payload.get("segments", [])
+    segment_fps = float(segment_payload.get("fps") or 0.0)
     _write_run_status(run_status_path, "segment_complete", {"segments": str(segments_path)})
 
     calib_out = workdir / "calib"
     calib_path = calib_out / "calib.json"
     verify_out = workdir / "verify_correspondences.json"
+    verify_skip_segments = max(0, int(((cfg.get("verify") or {}).get("skip_match_segments") or 0)))
+    verify_frame_idx = 0
+    if segment_fps > 0 and verify_skip_segments < len(segments):
+        verify_frame_idx = int(float(segments[verify_skip_segments].get("start_time_s", 0.0)) * segment_fps)
+    elif verify_skip_segments >= len(segments) and verify_skip_segments > 0:
+        _log(
+            "[chevron] run: verify.skip_match_segments is out of range; "
+            f"requested={verify_skip_segments}, segments={len(segments)}. Falling back to frame 0."
+        )
 
     _log("[chevron] run: verify stage")
-    _write_run_status(run_status_path, "verify_starting", {"video": proxy, "config": args.config})
+    _write_run_status(
+        run_status_path,
+        "verify_starting",
+        {
+            "video": proxy,
+            "config": args.config,
+            "frame_idx": verify_frame_idx,
+            "skip_match_segments": verify_skip_segments,
+        },
+    )
     verify_namespace = argparse.Namespace(
         video=proxy,
         config=args.config,
         out=str(verify_out),
-        frame=0,
+        frame=verify_frame_idx,
     )
     cmd_verify(verify_namespace)
     verified = read_json(verify_out)
@@ -361,7 +382,7 @@ def cmd_run(args):
     calib = read_json(calib_path)
     _write_run_status(run_status_path, "calibrate_complete", {"calib": str(calib_path)})
 
-    seg = read_json(segments_path)["segments"]
+    seg = segments
     _log("[chevron] run: raw match export stage")
     raw_out = work / "matches_raw"
     _write_run_status(run_status_path, "raw_export_starting", {"matches_raw_out": str(raw_out)})
