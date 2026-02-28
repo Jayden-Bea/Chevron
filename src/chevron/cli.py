@@ -41,6 +41,90 @@ def _format_segment_progress(details: dict) -> str:
     )
 
 
+def _format_render_progress(details: dict) -> str:
+    event = details.get("event")
+    match_index = details.get("match_index", 0)
+    total_matches = details.get("total_matches", 0)
+
+    if event == "match_start":
+        return (
+            "[chevron] run: render start "
+            f"match={match_index}/{total_matches} "
+            f"video_s={details.get('start_time_s', 0.0):.1f}->{details.get('end_time_s', 0.0):.1f} "
+            f"frames={details.get('total_frames', 0)}"
+        )
+
+    if event == "match_progress":
+        frame_idx = details.get("match_frame_idx", 0)
+        match_total = details.get("match_total_frames", 0) or 0
+        if match_total > 0:
+            pct = max(0.0, min(100.0, (frame_idx / match_total) * 100.0))
+            frame_text = f"{frame_idx}/{match_total} ({pct:.1f}%)"
+        else:
+            frame_text = str(frame_idx)
+        return (
+            "[chevron] run: render progress "
+            f"match={match_index}/{total_matches} "
+            f"frame={frame_text} "
+            f"video_t={details.get('video_time_s', 0.0):.1f}s"
+        )
+
+    if event == "match_complete":
+        return (
+            "[chevron] run: render complete "
+            f"match={match_index}/{total_matches} "
+            f"written_frames={details.get('written_frames', 0)} "
+            f"output={details.get('output')}"
+        )
+
+    return f"[chevron] run: render event={event} details={details}"
+
+
+def _export_raw_matches(video_path: str | Path, segments: list[dict], out_dir: str | Path) -> list[str]:
+    out = ensure_dir(out_dir)
+    outputs: list[str] = []
+
+    for i, seg in enumerate(segments, start=1):
+        start_s = float(seg.get("start_time_s", 0.0))
+        end_s = float(seg.get("end_time_s", 0.0))
+        if end_s <= start_s:
+            continue
+
+        clip_path = out / f"match_{i:03d}.mp4"
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            f"{start_s:.3f}",
+            "-to",
+            f"{end_s:.3f}",
+            "-i",
+            str(video_path),
+            "-an",
+            "-c:v",
+            "libx264",
+            "-pix_fmt",
+            "yuv420p",
+            str(clip_path),
+        ]
+        try:
+            subprocess.run(cmd, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            raise RuntimeError(f"Failed to export raw match clip {clip_path}: {exc.stderr.strip()}") from exc
+
+        outputs.append(str(clip_path))
+
+    write_json(
+        out / "matches_raw.json",
+        {
+            "source_video": str(video_path),
+            "outputs": outputs,
+            "segment_count": len(segments),
+        },
+    )
+    return outputs
+
+
 def cmd_ingest(args):
     from .ingest import ingest
 
@@ -113,10 +197,12 @@ def cmd_calibrate(args):
     cfg = load_config(args.config)
     crops = cfg["split"]["crops"]
     out = ensure_dir(args.out)
+    _log(f"[chevron] calibrate: extracting view frames -> {out / 'calib_frames'}")
     extract_view_frames(args.video, crops, out / "calib_frames")
 
     homographies = {}
     for cam_name, pairs in cfg["calibration"]["correspondences"].items():
+        _log(f"[chevron] calibrate: computing homography for view={cam_name} points={len(pairs.get('image_points', []))}")
         h = compute_homography(pairs["image_points"], pairs["field_points"])
         homographies[cam_name] = h.tolist()
 
@@ -141,7 +227,24 @@ def cmd_render(args):
     seg = read_json(args.segments)["segments"]
     calib = read_json(args.calib)
     cfg = load_config(args.config)
-    render_matches(args.video, seg, calib, cfg, args.out)
+
+    raw_out = Path(args.out) / "matches_raw"
+    _log(f"[chevron] render: exporting raw matches -> {raw_out}")
+    raw_outputs = _export_raw_matches(args.video, seg, raw_out)
+    _log(f"[chevron] render: raw export complete clips={len(raw_outputs)}")
+
+    def _on_render_progress(details: dict) -> None:
+        _log(_format_render_progress(details))
+
+    render_matches(
+        args.video,
+        seg,
+        calib,
+        cfg,
+        args.out,
+        progress_interval_s=cfg.get("monitoring", {}).get("render_progress_interval_s", 5.0),
+        progress_callback=_on_render_progress,
+    )
     _log("[chevron] render: complete")
 
 
@@ -223,11 +326,29 @@ def cmd_run(args):
 
     seg = read_json(segments_path)["segments"]
     calib = read_json(calib_path)
+    _log("[chevron] run: raw match export stage")
+    raw_out = work / "matches_raw"
+    _write_run_status(run_status_path, "raw_export_starting", {"matches_raw_out": str(raw_out)})
+    raw_outputs = _export_raw_matches(proxy, seg, raw_out)
+    _write_run_status(run_status_path, "raw_export_complete", {"clips": len(raw_outputs), "matches_raw_out": str(raw_out)})
+
     _log("[chevron] run: render stage")
     from .render.pipeline import render_matches
 
     _write_run_status(run_status_path, "render_starting", {"matches_out": str(work / "matches")})
-    render_matches(proxy, seg, calib, cfg, work / "matches")
+    def _on_render_progress(details: dict) -> None:
+        _log(_format_render_progress(details))
+        _write_run_status(run_status_path, "render_running", details)
+
+    render_matches(
+        proxy,
+        seg,
+        calib,
+        cfg,
+        work / "matches",
+        progress_interval_s=cfg.get("monitoring", {}).get("render_progress_interval_s", 5.0),
+        progress_callback=_on_render_progress,
+    )
     _write_run_status(run_status_path, "render_complete")
     _log("[chevron] run: complete")
 
