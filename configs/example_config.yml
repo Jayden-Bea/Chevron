@@ -53,6 +53,11 @@ ocr:
   enabled: false
   cadence_fps: 3
 
+verify:
+  # Number of detected match segments to skip before opening verify.
+  # Example: 1 starts verify on the second detected segment.
+  skip_match_segments: 0
+
 monitoring:
   segment_progress_interval_s: 10.0
   render_progress_interval_s: 5.0

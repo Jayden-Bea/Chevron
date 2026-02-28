@@ -74,10 +74,19 @@ Use the local verifier to define/adjust calibration correspondences before calib
 chevron verify --video workdir/proxy.mp4 --config configs/my_event.yml --out workdir/verify_correspondences.json
 ```
 
+You can also set in config:
+
+```yaml
+verify:
+  skip_match_segments: 1  # skip first detected segment before verify opens
+```
+
 What the local verifier does:
 - Opens one crop window and one field-canvas window per view (`top`, `bottom_left`, `bottom_right`).
 - Click an **image point** in the crop, then click its matching **field point** in the field canvas.
 - Keyboard controls: `n`/`Space`/`Enter` (next view), `u` (undo last pair), `c` (clear current view), `q` (save + quit), `Esc` (cancel).
+- On-screen status shows `pairs=<count>` and `pending=yes/no`; a pair is only committed when you click an image point then its matching field point.
+- Optional config: `verify.skip_match_segments` to start verify from a later detected match segment (`0` = first segment, `1` = skip segment 1/start at segment 2).
 - Saves correspondences JSON to the path given by `--out`.
 
 ### Quadrilateral vs rectangle
