@@ -88,7 +88,12 @@ def _format_render_progress(details: dict) -> str:
     return f"[chevron] run: render event={event} details={details}"
 
 
-def _export_raw_matches(video_path: str | Path, segments: list[dict], out_dir: str | Path) -> list[str]:
+def _export_raw_matches(
+    video_path: str | Path,
+    segments: list[dict],
+    out_dir: str | Path,
+    output_fps: float | None = None,
+) -> list[str]:
     out = ensure_dir(out_dir)
     outputs: list[str] = []
 
@@ -109,12 +114,16 @@ def _export_raw_matches(video_path: str | Path, segments: list[dict], out_dir: s
             "-i",
             str(video_path),
             "-an",
+        ]
+        if output_fps and output_fps > 0:
+            cmd.extend(["-vf", f"fps={float(output_fps):.3f}"])
+        cmd.extend([
             "-c:v",
             "libx264",
             "-pix_fmt",
             "yuv420p",
             str(clip_path),
-        ]
+        ])
         try:
             subprocess.run(cmd, check=True, capture_output=True, text=True)
         except subprocess.CalledProcessError as exc:
@@ -131,6 +140,17 @@ def _export_raw_matches(video_path: str | Path, segments: list[dict], out_dir: s
         },
     )
     return outputs
+
+
+def _resolve_output_fps(cfg: dict, cli_fps: int) -> int:
+    configured = (cfg.get("processing") or {}).get("output_fps")
+    if configured is None:
+        return int(cli_fps)
+    value = int(configured)
+    if value <= 0:
+        raise ValueError("processing.output_fps must be > 0")
+    return value
+
 
 
 def cmd_ingest(args):
@@ -158,6 +178,12 @@ def _load_existing_ingest_meta(workdir: Path) -> dict | None:
     if not proxy.exists():
         return None
     return meta
+
+
+def _load_existing_calibration(calib_path: Path) -> dict | None:
+    if not calib_path.exists():
+        return None
+    return read_json(calib_path)
 
 def cmd_segment(args):
     from .segment.detector import detect_segments
@@ -208,8 +234,10 @@ def cmd_calibrate(args):
     _log(f"[chevron] calibrate: extracting view frames -> {out / 'calib_frames'}")
     extract_view_frames(args.video, crops, out / "calib_frames")
 
+    correspondences = getattr(args, "correspondences", None) or cfg["calibration"]["correspondences"]
+
     homographies = {}
-    for cam_name, pairs in cfg["calibration"]["correspondences"].items():
+    for cam_name, pairs in correspondences.items():
         _log(f"[chevron] calibrate: computing homography for view={cam_name} points={len(pairs.get('image_points', []))}")
         h = compute_homography(pairs["image_points"], pairs["field_points"])
         homographies[cam_name] = h.tolist()
@@ -235,10 +263,11 @@ def cmd_render(args):
     seg = read_json(args.segments)["segments"]
     calib = read_json(args.calib)
     cfg = load_config(args.config)
+    output_fps = _resolve_output_fps(cfg, args.fps)
 
     raw_out = Path(args.out) / "matches_raw"
     _log(f"[chevron] render: exporting raw matches -> {raw_out}")
-    raw_outputs = _export_raw_matches(args.video, seg, raw_out)
+    raw_outputs = _export_raw_matches(args.video, seg, raw_out, output_fps=output_fps)
     _log(f"[chevron] render: raw export complete clips={len(raw_outputs)}")
 
     def _on_render_progress(details: dict) -> None:
@@ -250,6 +279,7 @@ def cmd_render(args):
         calib,
         cfg,
         args.out,
+        output_fps=output_fps,
         progress_interval_s=cfg.get("monitoring", {}).get("render_progress_interval_s", 5.0),
         progress_callback=_on_render_progress,
     )
@@ -259,36 +289,19 @@ def cmd_render(args):
 
 
 def cmd_verify(args):
-    app_path = Path(__file__).resolve().parent / "ui" / "verify_app.py"
-    cmd = [
-        sys.executable,
-        "-m",
-        "streamlit",
-        "run",
-        str(app_path),
-        "--server.port",
-        str(args.port),
-        "--server.address",
-        args.host,
-        "--server.headless",
-        "false" if args.browser else "true",
-        "--",
-        "--video",
-        args.video,
-        "--config",
-        args.config,
-    ]
-    if args.calib:
-        cmd.extend(["--calib", args.calib])
-    if args.frame is not None:
-        cmd.extend(["--frame", str(args.frame)])
-    subprocess.run(cmd, check=True)
+    from .ui.verify_gui import run_local_verify
+
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    run_local_verify(args.video, args.config, out_json=out, frame_idx=args.frame)
+    _log(f"[chevron] verify: saved correspondences -> {out}")
 
 def cmd_run(args):
     from .ingest import ingest
 
     work = ensure_dir(args.out)
     cfg = load_config(args.config)
+    output_fps = _resolve_output_fps(cfg, args.fps)
     workdir = ensure_dir(work / "workdir")
     run_status_path = workdir / "run_status.json"
 
@@ -297,7 +310,7 @@ def cmd_run(args):
     ingest_meta = _load_existing_ingest_meta(workdir) if args.resume else None
     if ingest_meta is None:
         _log("[chevron] run: ingest stage")
-        ingest_meta = ingest(url=args.url, video=args.video, out_dir=workdir, fps=args.fps)
+        ingest_meta = ingest(url=args.url, video=args.video, out_dir=workdir, fps=output_fps)
         _write_run_status(run_status_path, "ingest_complete", {"proxy": ingest_meta.get("proxy")})
     else:
         _log("[chevron] run: reusing previous ingest output")
@@ -325,19 +338,34 @@ def cmd_run(args):
     _write_run_status(run_status_path, "segment_complete", {"segments": str(segments_path)})
 
     calib_out = workdir / "calib"
+    calib_path = calib_out / "calib.json"
+    verify_out = workdir / "verify_correspondences.json"
+
+    _log("[chevron] run: verify stage")
+    _write_run_status(run_status_path, "verify_starting", {"video": proxy, "config": args.config})
+    verify_namespace = argparse.Namespace(
+        video=proxy,
+        config=args.config,
+        out=str(verify_out),
+        frame=0,
+    )
+    cmd_verify(verify_namespace)
+    verified = read_json(verify_out)
+    correspondences = verified.get("correspondences", {})
+    _write_run_status(run_status_path, "verify_complete", {"video": proxy, "config": args.config, "out": str(verify_out)})
+
     _log("[chevron] run: calibrate stage")
     _write_run_status(run_status_path, "calibrate_starting", {"out": str(calib_out)})
-    namespace = argparse.Namespace(video=proxy, config=args.config, out=calib_out)
+    namespace = argparse.Namespace(video=proxy, config=args.config, out=calib_out, correspondences=correspondences)
     cmd_calibrate(namespace)
-    calib_path = calib_out / "calib.json"
+    calib = read_json(calib_path)
     _write_run_status(run_status_path, "calibrate_complete", {"calib": str(calib_path)})
 
     seg = read_json(segments_path)["segments"]
-    calib = read_json(calib_path)
     _log("[chevron] run: raw match export stage")
     raw_out = work / "matches_raw"
     _write_run_status(run_status_path, "raw_export_starting", {"matches_raw_out": str(raw_out)})
-    raw_outputs = _export_raw_matches(proxy, seg, raw_out)
+    raw_outputs = _export_raw_matches(proxy, seg, raw_out, output_fps=output_fps)
     _write_run_status(run_status_path, "raw_export_complete", {"clips": len(raw_outputs), "matches_raw_out": str(raw_out)})
 
     _log("[chevron] run: render stage")
@@ -354,6 +382,7 @@ def cmd_run(args):
         calib,
         cfg,
         work / "matches",
+        output_fps=output_fps,
         progress_interval_s=cfg.get("monitoring", {}).get("render_progress_interval_s", 5.0),
         progress_callback=_on_render_progress,
     )
@@ -397,19 +426,15 @@ def build_parser():
     s.add_argument("--calib", required=True)
     s.add_argument("--config", required=True)
     s.add_argument("--out", required=True)
+    s.add_argument("--fps", type=int, default=30)
     s.set_defaults(func=cmd_render)
 
 
     s = sub.add_parser("verify")
     s.add_argument("--video", required=True)
     s.add_argument("--config", required=True)
-    s.add_argument("--calib")
+    s.add_argument("--out", required=True)
     s.add_argument("--frame", type=int, default=0)
-    s.add_argument("--port", type=int, default=8501)
-    s.add_argument("--host", default="127.0.0.1")
-    s.add_argument("--browser", dest="browser", action="store_true")
-    s.add_argument("--no-browser", dest="browser", action="store_false")
-    s.set_defaults(browser=True)
     s.set_defaults(func=cmd_verify)
 
     s = sub.add_parser("run")

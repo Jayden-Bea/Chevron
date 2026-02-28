@@ -1,6 +1,13 @@
 from pathlib import Path
 
-from chevron.cli import _export_raw_matches, _format_render_progress, _format_segment_progress
+from chevron.cli import (
+    _export_raw_matches,
+    _format_render_progress,
+    _format_segment_progress,
+    _load_existing_calibration,
+    _resolve_output_fps,
+    build_parser,
+)
 
 
 def test_format_segment_progress_formats_numeric_scores():
@@ -122,3 +129,60 @@ def test_format_render_progress_for_skipped_match():
 
     assert "render skipped" in message
     assert "reason=already_rendered" in message
+
+
+def test_load_existing_calibration_returns_none_for_missing_file(tmp_path):
+    assert _load_existing_calibration(tmp_path / "missing_calib.json") is None
+
+
+def test_load_existing_calibration_reads_existing_file(tmp_path):
+    calib_path = tmp_path / "calib.json"
+    calib_path.write_text('{"version": "v1"}', encoding="utf-8")
+
+    calib = _load_existing_calibration(calib_path)
+
+    assert calib == {"version": "v1"}
+
+
+def test_verify_parser_requires_output_path():
+    parser = build_parser()
+
+    args = parser.parse_args([
+        "verify",
+        "--video",
+        "proxy.mp4",
+        "--config",
+        "configs/example_config.yml",
+        "--out",
+        "out/verify_correspondences.json",
+    ])
+
+    assert args.out.endswith("verify_correspondences.json")
+
+
+def test_run_parser_defaults_resume_enabled():
+    parser = build_parser()
+
+    args = parser.parse_args([
+        "run",
+        "--video",
+        "proxy.mp4",
+        "--config",
+        "configs/example_config.yml",
+        "--out",
+        "out_dir",
+    ])
+
+    assert args.resume is True
+
+
+def test_resolve_output_fps_uses_config_when_available():
+    fps = _resolve_output_fps({"processing": {"output_fps": 10}}, cli_fps=30)
+
+    assert fps == 10
+
+
+def test_resolve_output_fps_falls_back_to_cli_default():
+    fps = _resolve_output_fps({}, cli_fps=30)
+
+    assert fps == 30
