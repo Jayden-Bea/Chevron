@@ -6,7 +6,7 @@
 
 Implemented focus:
 - Ingest YouTube/local video and normalize to proxy MP4.
-- Detect match boundaries using template matching + debounce state machine.
+- Detect match boundaries using template matching + debounce state machine OR audio cue matching + fixed match length.
 - Split default 3-view broadcast layout (top, bottom-left, bottom-right).
 - Calibrate per-view homographies from manual correspondences in config.
 - Render stitched top-down match videos and per-frame metadata.
@@ -26,11 +26,18 @@ pip install -e .[dev]
 ## Quickstart
 
 1) Edit `configs/example_config.yml` for your event:
-- Set ROI rectangles for start/stop/clock overlays.
-- `start.png` and `stop.png` are matched *inside* those ROIs (or inside the full frame if `rois.start`/`rois.stop` are omitted).
-- Matches are similarity-based (not exact-pixel-equality); if a template is larger than the ROI, Chevron auto-downscales it to fit before matching. Tune `thresholds.start/stop` and optional `matching.template_scale_tolerance_pct` (e.g. `1.0`) for slight overlay size drift.
-- Replace template image paths with screenshots from your broadcast.
-- Add your own `configs/templates/start.png` and `configs/templates/stop.png` (not bundled in-repo).
+- Choose a segment mode in config:
+  - `segment.mode: template` (legacy visual start/stop matching).
+  - `segment.mode: audio_cue` (recommended when the clock/overlay is ambiguous).
+- For `template` mode:
+  - Set ROI rectangles for start/stop/clock overlays.
+  - `start.png` and `stop.png` are matched *inside* those ROIs (or inside the full frame if `rois.start`/`rois.stop` are omitted).
+  - Matches are similarity-based (not exact-pixel-equality); if a template is larger than the ROI, Chevron auto-downscales it to fit before matching. Tune `thresholds.start/stop` and optional `matching.template_scale_tolerance_pct` (e.g. `1.0`) for slight overlay size drift.
+  - Replace template image paths with screenshots from your broadcast.
+- For `audio_cue` mode:
+  - Provide a short horn cue clip in `audio_cue.template` (e.g. `configs/templates/horn.wav`).
+  - Tune `audio_cue.threshold` for robustness in noisy broadcasts.
+  - Set `segment.match_length_s` to control how long Chevron records after each detected cue.
 - Set crop rectangles (or use `split` preview helper).
 - Add calibration correspondences for each camera view.
 
@@ -108,12 +115,14 @@ Debug artifacts:
 ## Troubleshooting
 
 - **No segments found**:
-  - lower `thresholds.start`/`thresholds.stop`.
-  - verify ROI boxes tightly contain overlay cues.
-  - ensure template images are from the same broadcast style/resolution.
+  - in `template` mode, lower `thresholds.start`/`thresholds.stop`.
+  - in `template` mode, verify ROI boxes tightly contain overlay cues.
+  - in `audio_cue` mode, lower `audio_cue.threshold` and use a cleaner horn sample.
 - **False starts/stops**:
-  - increase `debounce.min_start_s` / `debounce.min_stop_s`.
-  - increase `debounce.min_match_s`.
+  - in `template` mode, increase `debounce.min_start_s` / `debounce.min_stop_s` and `debounce.min_match_s`.
+  - in `audio_cue` mode, increase `audio_cue.threshold` and/or `audio_cue.min_separation_s`.
+- **Segments are too short/long in audio mode**:
+  - adjust `segment.match_length_s` to your event timing.
 - **Warp looks stretched**:
   - add better-distributed correspondence points.
   - verify field coordinate units and `px_per_unit`.

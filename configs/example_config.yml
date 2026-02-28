@@ -38,6 +38,17 @@ calibration:
     bottom_right:
       image_points: [[0,0], [959,0], [959,539], [0,539]]
       field_points: [[987,0], [1975,0], [1975,987], [987,987]]
+segment:
+  # template (legacy): start/stop image matching inside ROIs
+  # audio_cue: detect starts by matching a horn/audio cue, then cut fixed-length matches
+  mode: template
+  match_length_s: 150.0
+audio_cue:
+  # user-provided horn/queue clip (repo does not ship binary audio assets)
+  template: configs/templates/horn.wav
+  sample_rate_hz: 16000
+  threshold: 0.45
+  min_separation_s: 60.0
 ocr:
   enabled: false
   cadence_fps: 3

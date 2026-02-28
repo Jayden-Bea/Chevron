@@ -2,9 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+import subprocess
+import tempfile
 from typing import Callable
+import wave
 
 import cv2
+import numpy as np
 
 from ..utils.io import ensure_dir, write_json
 
@@ -132,6 +136,160 @@ def _template_score(img, template, scale_factors: list[float] | None = None):
     return best
 
 
+def _extract_audio_samples(path: str | Path, sample_rate_hz: int) -> tuple[np.ndarray, int]:
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+        tmp_wav = Path(tmp.name)
+    try:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-i",
+            str(path),
+            "-vn",
+            "-ac",
+            "1",
+            "-ar",
+            str(sample_rate_hz),
+            "-f",
+            "wav",
+            str(tmp_wav),
+        ]
+        proc = subprocess.run(cmd, capture_output=True, text=True)
+        if proc.returncode != 0:
+            raise RuntimeError(f"ffmpeg audio extract failed for {path}: {proc.stderr.strip()}")
+
+        with wave.open(str(tmp_wav), "rb") as wav_file:
+            sr = wav_file.getframerate()
+            n_channels = wav_file.getnchannels()
+            sample_width = wav_file.getsampwidth()
+            n_frames = wav_file.getnframes()
+            pcm = wav_file.readframes(n_frames)
+
+        if sample_width != 2:
+            raise ValueError(f"Unsupported WAV sample width {sample_width * 8} bits for {path}")
+
+        audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+        if n_channels > 1:
+            audio = audio.reshape(-1, n_channels).mean(axis=1)
+        return audio, sr
+    finally:
+        tmp_wav.unlink(missing_ok=True)
+
+
+def _spectrogram(signal: np.ndarray, n_fft: int = 2048, hop: int = 512) -> np.ndarray:
+    sig = np.asarray(signal, dtype=np.float32)
+    if sig.size < n_fft:
+        sig = np.pad(sig, (0, n_fft - sig.size))
+
+    win = np.hanning(n_fft).astype(np.float32)
+    frames: list[np.ndarray] = []
+    for start in range(0, sig.size - n_fft + 1, hop):
+        frame = sig[start : start + n_fft] * win
+        spec = np.abs(np.fft.rfft(frame))
+        frames.append(np.log1p(spec))
+
+    if not frames:
+        return np.zeros((1, 1), dtype=np.float32)
+    out = np.stack(frames, axis=1).astype(np.float32)
+    out -= out.mean(axis=0, keepdims=True)
+    std = out.std(axis=0, keepdims=True) + 1e-6
+    return out / std
+
+
+def _find_audio_cue_times(
+    program_audio: np.ndarray,
+    cue_audio: np.ndarray,
+    sample_rate_hz: int,
+    threshold: float,
+    min_separation_s: float,
+) -> list[tuple[float, float]]:
+    prog_spec = _spectrogram(program_audio)
+    cue_spec = _spectrogram(cue_audio)
+    if prog_spec.shape[1] < cue_spec.shape[1]:
+        return []
+
+    scores = cv2.matchTemplate(prog_spec, cue_spec, cv2.TM_CCOEFF_NORMED).reshape(-1)
+    hop = 512
+    min_sep_frames = max(1, int((min_separation_s * sample_rate_hz) / hop))
+
+    candidates = np.where(scores >= threshold)[0]
+    if candidates.size == 0:
+        return []
+
+    order = sorted(candidates.tolist(), key=lambda idx: float(scores[idx]), reverse=True)
+    chosen: list[int] = []
+    for idx in order:
+        if any(abs(idx - selected) < min_sep_frames for selected in chosen):
+            continue
+        chosen.append(idx)
+
+    chosen.sort()
+    return [(idx * hop / sample_rate_hz, float(scores[idx])) for idx in chosen]
+
+
+def _detect_segments_audio_cue(
+    video_path: str | Path,
+    cfg: dict,
+    total_frames: int,
+    fps: float,
+    progress_callback: Callable[[dict], None] | None,
+) -> list[dict]:
+    audio_cfg = cfg.get("audio_cue", {})
+    cue_path = audio_cfg.get("template")
+    if not cue_path:
+        raise ValueError("audio_cue.template is required when segment.mode=audio_cue")
+
+    sample_rate_hz = int(audio_cfg.get("sample_rate_hz", 16000))
+    threshold = float(audio_cfg.get("threshold", 0.45))
+    min_separation_s = float(audio_cfg.get("min_separation_s", 60.0))
+    match_length_s = float(cfg.get("segment", {}).get("match_length_s", 150.0))
+
+    program_audio, program_sr = _extract_audio_samples(video_path, sample_rate_hz=sample_rate_hz)
+    cue_audio, cue_sr = _extract_audio_samples(cue_path, sample_rate_hz=sample_rate_hz)
+    if program_sr != cue_sr:
+        raise ValueError(f"Audio sample-rate mismatch: video={program_sr}, cue={cue_sr}")
+
+    cue_hits = _find_audio_cue_times(
+        program_audio=program_audio,
+        cue_audio=cue_audio,
+        sample_rate_hz=program_sr,
+        threshold=threshold,
+        min_separation_s=min_separation_s,
+    )
+
+    duration_s = total_frames / fps if fps > 0 else 0.0
+    segments: list[dict] = []
+    for t_start, score in cue_hits:
+        t_end = min(t_start + match_length_s, duration_s)
+        if t_end <= t_start:
+            continue
+        segments.append(
+            {
+                "start_time_s": round(t_start, 3),
+                "end_time_s": round(t_end, 3),
+                "confidence": round(float(score), 3),
+                "debug_frame_paths": [],
+            }
+        )
+
+    if progress_callback:
+        progress_callback(
+            {
+                "frame_idx": 0,
+                "time_s": 0.0,
+                "fps": round(fps, 3),
+                "total_frames": total_frames,
+                "state": "AUDIO_CUE",
+                "start_score": None,
+                "stop_score": None,
+                "start_hit": bool(cue_hits),
+                "stop_hit": None,
+                "segments_found": len(segments),
+            }
+        )
+    return segments
+
+
 def detect_segments(
     video_path: str | Path,
     cfg: dict,
@@ -145,8 +303,9 @@ def detect_segments(
     dt_s = 1.0 / fps
     total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
 
-    start_tpl = cv2.imread(cfg["templates"]["start"], cv2.IMREAD_COLOR)
-    stop_tpl = cv2.imread(cfg["templates"]["stop"], cv2.IMREAD_COLOR)
+    mode = cfg.get("segment", {}).get("mode", "template")
+    start_tpl = None
+    stop_tpl = None
     rois = cfg.get("rois", {})
     start_roi_cfg = rois.get("start")
     stop_roi_cfg = rois.get("stop")
@@ -166,6 +325,21 @@ def detect_segments(
 
     start_roi: list[int] | None = None
     stop_roi: list[int] | None = None
+
+    if mode == "audio_cue":
+        cap.release()
+        segments = _detect_segments_audio_cue(
+            video_path=video_path,
+            cfg=cfg,
+            total_frames=total_frames,
+            fps=fps,
+            progress_callback=progress_callback,
+        )
+        write_json(out_json, {"segments": segments, "fps": fps})
+        return segments
+
+    start_tpl = cv2.imread(cfg["templates"]["start"], cv2.IMREAD_COLOR)
+    stop_tpl = cv2.imread(cfg["templates"]["stop"], cv2.IMREAD_COLOR)
 
     while True:
         ok, frame = cap.read()

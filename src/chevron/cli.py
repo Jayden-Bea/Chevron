@@ -15,6 +15,11 @@ def _log(message: str) -> None:
 
 
 def _format_segment_progress(details: dict) -> str:
+    def _fmt_score(value) -> str:
+        if isinstance(value, (int, float)):
+            return f"{float(value):.3f}"
+        return "n/a"
+
     total_frames = details.get("total_frames", 0) or 0
     frame_idx = details.get("frame_idx", 0)
     if total_frames > 0:
@@ -23,12 +28,14 @@ def _format_segment_progress(details: dict) -> str:
     else:
         progress = f"{frame_idx} frames"
 
+    start_score = _fmt_score(details.get("start_score"))
+    stop_score = _fmt_score(details.get("stop_score"))
     return (
         "[chevron] run: segment progress "
         f"t={details.get('time_s', 0.0):.1f}s "
         f"frame={progress} "
         f"state={details.get('state')} "
-        f"scores(start={details.get('start_score', 0.0):.3f}, stop={details.get('stop_score', 0.0):.3f}) "
+        f"scores(start={start_score}, stop={stop_score}) "
         f"hits(start={details.get('start_hit')}, stop={details.get('stop_hit')}) "
         f"segments={details.get('segments_found', 0)}"
     )
