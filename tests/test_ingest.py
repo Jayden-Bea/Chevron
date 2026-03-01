@@ -5,6 +5,7 @@ import pytest
 
 from chevron.ingest import (
     YouTubeDownloadResult,
+    _build_download_sections_args,
     _download_youtube,
     _ensure_yt_dlp_minimum_version,
     _is_retryable_ytdlp_error,
@@ -240,6 +241,30 @@ def test_download_youtube_uses_provided_cookie_header_first(monkeypatch, tmp_pat
     assert "--add-header" in calls[0]
 
 
+def test_download_youtube_includes_download_sections_when_start_and_end_set(monkeypatch, tmp_path: Path):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, check, text, capture_output):
+        calls.append(cmd)
+        out_file = tmp_path / "clip.mp4"
+        out_file.write_bytes(b"video")
+        return None
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    _download_youtube(
+        "https://youtube.com/watch?v=abc123",
+        tmp_path,
+        start_at="00:01:00",
+        end_at="00:03:00",
+    )
+
+    assert "--download-sections" in calls[0]
+    section_idx = calls[0].index("--download-sections")
+    assert calls[0][section_idx + 1] == "*00:01:00-00:03:00"
+
+
 def test_download_youtube_falls_back_to_automatic_strategies_when_provided_cookie_fails(monkeypatch, tmp_path: Path):
     calls = {"count": 0}
 
@@ -272,6 +297,25 @@ def test_normalize_youtube_cookie_header_accepts_plain_cookie_value():
     normalized = _normalize_youtube_cookie_header("SID=abc; HSID=def")
 
     assert normalized == "SID=abc; HSID=def"
+
+
+def test_build_download_sections_args_requires_both_start_and_end():
+    with pytest.raises(ValueError, match="Both start_at and end_at"):
+        _build_download_sections_args("00:01:00", None)
+
+
+def test_build_download_sections_args_validates_timestamp_format():
+    with pytest.raises(ValueError, match="Invalid --start-at"):
+        _build_download_sections_args("1:00", "00:02:00")
+
+    with pytest.raises(ValueError, match="Invalid --end-at"):
+        _build_download_sections_args("00:01:00", "2:00")
+
+
+def test_build_download_sections_args_returns_expected_yt_dlp_flag():
+    args = _build_download_sections_args("00:01:00", "00:02:30")
+
+    assert args == ["--download-sections", "*00:01:00-00:02:30"]
 
 
 def test_normalize_youtube_cookie_header_accepts_cookie_prefix():
@@ -472,25 +516,38 @@ def test_ingest_url_uses_downloaded_mp4_as_proxy_without_normalization(monkeypat
     out_dir = tmp_path / "workdir"
     proxy_path = out_dir / "proxy.mp4"
 
-    monkeypatch.setattr(
-        "chevron.ingest._download_youtube",
-        lambda *args, **kwargs: YouTubeDownloadResult(
+    captured = {}
+
+    def fake_download(*args, **kwargs):
+        captured["start_at"] = kwargs.get("start_at")
+        captured["end_at"] = kwargs.get("end_at")
+        return YouTubeDownloadResult(
             source_path=proxy_path,
             successful_strategy="default",
             successful_strategy_args=[],
             attempts=[{"strategy": "default", "status": "success", "returncode": 0}],
-        ),
-    )
+        )
+
+    monkeypatch.setattr("chevron.ingest._download_youtube", fake_download)
 
     def fail_normalize(*args, **kwargs):
         raise AssertionError("normalize_video should not run for URL ingest")
 
     monkeypatch.setattr("chevron.ingest.normalize_video", fail_normalize)
 
-    meta = ingest(url="https://youtube.com/watch?v=abc123", video=None, out_dir=out_dir, fps=10)
+    meta = ingest(
+        url="https://youtube.com/watch?v=abc123",
+        video=None,
+        out_dir=out_dir,
+        fps=10,
+        start_at="00:00:30",
+        end_at="00:02:30",
+    )
 
     assert meta["source"].endswith("proxy.mp4")
     assert meta["proxy"].endswith("proxy.mp4")
+    assert captured["start_at"] == "00:00:30"
+    assert captured["end_at"] == "00:02:30"
 
 
 def test_ingest_local_mp4_copies_to_proxy_without_normalization(monkeypatch, tmp_path: Path):
