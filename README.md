@@ -82,10 +82,11 @@ verify:
 ```
 
 What the local verifier does:
-- Opens one crop window and one field-canvas window per view (`top`, `bottom_left`, `bottom_right`).
+- Opens one crop window, one field-canvas window, and one live single-frame render preview window while you edit correspondences.
 - Click an **image point** in the crop, then click its matching **field point** in the field canvas.
-- Keyboard controls: `n`/`Space`/`Enter` (next view), `u` (undo last pair), `c` (clear current view), `q` (save + quit), `Esc` (cancel).
-- On-screen status shows `pairs=<count>` and `pending=yes/no`; a pair is only committed when you click an image point then its matching field point.
+- Keyboard controls: `n`/`Space`/`Enter` (advance to next view), `u` (undo last pair), `c` (clear current view), `q` (save + quit), `Esc` (cancel).
+- On-screen status shows `pairs=<count>` and `pending=yes/no`; a pair is only committed when you click an image point then its matching field point. The render preview updates continuously using the current point pairs.
+- Verify always proceeds through all configured views sequentially (`top` -> `bottom_left` -> `bottom_right`) each run.
 - Optional config: `verify.skip_match_segments` to start verify from a later detected match segment (`0` = first segment, `1` = skip segment 1/start at segment 2).
 - Saves correspondences JSON to the path given by `--out`.
 
