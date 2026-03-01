@@ -1,17 +1,23 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import subprocess
 import sys
 from pathlib import Path
-from time import time
+from time import monotonic, time
 
 from .utils.config import load_config
 from .utils.io import ensure_dir, read_json, write_json
 
 
+_LOG_MONOTONIC_START = monotonic()
+
+
 def _log(message: str) -> None:
-    print(message, flush=True)
+    ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+    elapsed_s = monotonic() - _LOG_MONOTONIC_START
+    print(f"[{ts} +{elapsed_s:8.2f}s] {message}", flush=True)
 
 
 def _format_segment_progress(details: dict) -> str:
@@ -150,6 +156,40 @@ def _resolve_output_fps(cfg: dict, cli_fps: int) -> int:
     if value <= 0:
         raise ValueError("processing.output_fps must be > 0")
     return value
+
+
+def cmd_detect(args):
+    """Step-2 detection scaffolding for CV tracking development."""
+
+    out = ensure_dir(args.out)
+    ref_dir = ensure_dir(out / "reference")
+    reference_path = ref_dir / "fuel_element_reference.png"
+
+    if args.reference:
+        src = Path(args.reference)
+        if not src.exists():
+            raise FileNotFoundError(f"Reference image not found: {src}")
+        reference_path.write_bytes(src.read_bytes())
+        _log(f"[chevron] detect: stored reference image -> {reference_path}")
+    elif not reference_path.exists():
+        _log(
+            "[chevron] detect: no reference image provided; "
+            "run again with --reference /path/to/fuel_element.png"
+        )
+
+    state = {
+        "stage": "step2_detect_bootstrap",
+        "reference_image": str(reference_path) if reference_path.exists() else None,
+        "notes": {
+            "goal": "Track fuel elements across pseudo-top-down views",
+            "distortion_tolerance": (
+                "Use feature/descriptor or augmentation-aware matching to tolerate "
+                "homography-induced stretching"
+            ),
+        },
+    }
+    write_json(out / "detect_state.json", state)
+    _log(f"[chevron] detect: initialized state -> {out / 'detect_state.json'}")
 
 
 
@@ -473,6 +513,11 @@ def build_parser():
     s.set_defaults(resume=True)
     s.set_defaults(verify_browser=True)
     s.set_defaults(func=cmd_run)
+
+    s = sub.add_parser("detect")
+    s.add_argument("--out", required=True)
+    s.add_argument("--reference", required=False)
+    s.set_defaults(func=cmd_detect)
     return p
 
 

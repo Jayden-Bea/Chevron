@@ -119,6 +119,8 @@ Raw extracted source clips before top-down rendering:
 - Optional monitoring knobs in config: `monitoring.segment_progress_interval_s` and `monitoring.render_progress_interval_s` (seconds).
 - `chevron run` defaults to `--resume`, so if `workdir/ingest_meta.json` + proxy already exist, ingest is reused instead of re-running.
 - On resumed runs, already-rendered match outputs are detected (`match_<n>/topdown.mp4` + `match_meta.json`) and skipped; only missing matches are rendered.
+- CLI logs now include both UTC timestamps and elapsed runtime for easier step-by-step time estimation.
+- Added `chevron detect --out <dir> [--reference <fuel_element_image>]` as a step-2 bootstrap command to store a fuel-element reference image and initialize CV-tracking state metadata.
 Debug artifacts:
 - segment score frames in `segment_debug/`
 - split layout preview image

@@ -1,12 +1,15 @@
 from pathlib import Path
+import re
 
 from chevron.cli import (
     _export_raw_matches,
     _format_render_progress,
     _format_segment_progress,
+    _log,
     _load_existing_calibration,
     _resolve_output_fps,
     build_parser,
+    cmd_detect,
 )
 
 
@@ -186,3 +189,40 @@ def test_resolve_output_fps_falls_back_to_cli_default():
     fps = _resolve_output_fps({}, cli_fps=30)
 
     assert fps == 30
+
+
+def test_log_includes_absolute_and_relative_timestamps(capsys):
+    _log("[chevron] test message")
+
+    captured = capsys.readouterr().out.strip()
+    assert "[chevron] test message" in captured
+    assert re.search(r"^\[\d{4}-\d{2}-\d{2}T.*Z \+\s*\d+\.\d{2}s\]", captured)
+
+
+def test_detect_parser_accepts_reference_path():
+    parser = build_parser()
+
+    args = parser.parse_args([
+        "detect",
+        "--out",
+        "out_dir/detect",
+        "--reference",
+        "fixtures/fuel.png",
+    ])
+
+    assert args.out == "out_dir/detect"
+    assert args.reference == "fixtures/fuel.png"
+
+
+def test_cmd_detect_writes_state_and_reference(tmp_path):
+    ref = tmp_path / "input_reference.png"
+    ref.write_bytes(b"reference-image")
+    out = tmp_path / "detect_out"
+
+    cmd_detect(type("Args", (), {"out": str(out), "reference": str(ref)})())
+
+    saved_ref = out / "reference" / "fuel_element_reference.png"
+    assert saved_ref.read_bytes() == b"reference-image"
+
+    state_path = out / "detect_state.json"
+    assert state_path.exists()
