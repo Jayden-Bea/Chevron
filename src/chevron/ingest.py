@@ -21,7 +21,14 @@ _DEFAULT_YOUTUBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWe
 _YTDLP_MIN_VERSION = "2026.02.21"
 _YTDLP_PREFERRED_FORMAT_ARGS = [
     "-f",
-    "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+    (
+        "bv*[vcodec~='^(avc1|h264)'][ext=mp4]+ba[ext=m4a]/"
+        "b[vcodec~='^(avc1|h264)'][ext=mp4]/"
+        "bv*[vcodec~='^(avc1|h264)']+ba/"
+        "b[vcodec~='^(avc1|h264)']/"
+        "bv*[ext=mp4]+ba[ext=m4a]/"
+        "b[ext=mp4]/best"
+    ),
     "--merge-output-format",
     "mp4",
 ]
