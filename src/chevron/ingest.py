@@ -11,8 +11,10 @@ from .utils.io import ensure_dir, write_json
 def _is_retryable_ytdlp_error(message: str) -> bool:
     lowered = message.lower()
     is_403 = "403" in lowered and "forbidden" in lowered
+    is_429 = "429" in lowered and "too many requests" in lowered
     is_outdated_client = "youtube client outdated" in lowered
-    return is_403 or is_outdated_client
+    is_bot_challenge = "sign in to confirm" in lowered and "not a bot" in lowered
+    return is_403 or is_429 or is_outdated_client or is_bot_challenge
 
 
 def _download_youtube(url: str, cache_dir: Path) -> Path:
@@ -26,6 +28,8 @@ def _download_youtube(url: str, cache_dir: Path) -> Path:
         "ios",
         "tv_embedded",
     ]
+
+    last_error_message = ""
 
     for idx, client in enumerate(client_settings):
         cmd = ["yt-dlp", "-o", output_tmpl]
@@ -43,12 +47,14 @@ def _download_youtube(url: str, cache_dir: Path) -> Path:
             ) from err
         except subprocess.CalledProcessError as err:
             message = "\n".join([err.stdout or "", err.stderr or ""])
+            last_error_message = message.strip()
             is_last_client = idx == len(client_settings) - 1
             if _is_retryable_ytdlp_error(message) and not is_last_client:
                 continue
             if _is_retryable_ytdlp_error(message) and is_last_client:
                 raise RuntimeError(
-                    "yt-dlp could not download the URL after trying multiple YouTube clients"
+                    "yt-dlp could not download the URL after trying multiple YouTube clients. "
+                    f"Last error: {last_error_message or 'unknown yt-dlp failure'}"
                 ) from err
             raise
 
