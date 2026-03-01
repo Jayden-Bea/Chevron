@@ -19,6 +19,12 @@ _RESET = "\x1b[0m"
 _DEFAULT_YOUTUBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
 _YTDLP_MIN_VERSION = "2026.02.21"
+_YTDLP_PREFERRED_FORMAT_ARGS = [
+    "-f",
+    "bv*[ext=mp4]+ba[ext=m4a]/b[ext=mp4]/best",
+    "--merge-output-format",
+    "mp4",
+]
 
 
 def _parse_yt_dlp_version(version_text: str) -> tuple[int, int, int] | None:
@@ -255,6 +261,7 @@ def _attempt_manual_cookie_download(
         "yt-dlp",
         "-o",
         output_tmpl,
+        *_YTDLP_PREFERRED_FORMAT_ARGS,
         "--extractor-args",
         "youtube:player_client=web",
         "--add-header",
@@ -370,7 +377,7 @@ def _download_youtube(
         logger("Provided --youtube-cookie value did not contain a usable Cookie header; retrying automatic YouTube strategies.")
 
     for strategy in strategies:
-        cmd = ["yt-dlp", "-o", output_tmpl]
+        cmd = ["yt-dlp", "-o", output_tmpl, *_YTDLP_PREFERRED_FORMAT_ARGS]
         cmd.extend(strategy["args"])
         cmd.append(url)
 
