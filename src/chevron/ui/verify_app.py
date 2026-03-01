@@ -17,7 +17,7 @@ from chevron.split.layout import get_layout
 from chevron.utils.config import load_config
 from chevron.utils.io import read_json
 
-VIEW_NAMES = ["top", "bottom_left", "bottom_right"]
+VIEW_NAMES = ["top"]
 
 
 class FrameReader:
@@ -67,8 +67,6 @@ def draw_crops(frame_bgr: np.ndarray, crops_dict: dict[str, list[int]]) -> np.nd
     out = frame_bgr.copy()
     color_map = {
         "top": (255, 100, 0),
-        "bottom_left": (80, 220, 80),
-        "bottom_right": (180, 80, 255),
     }
     for label, rect in (crops_dict or {}).items():
         x, y, w, h = map(int, rect)
@@ -274,7 +272,7 @@ def main(argv: list[str] | None = None) -> None:
     st.info(
         """
 **How to pick calibration points (before rendering):**
-- **Image points** are pixel coordinates on each camera crop (top / bottom_left / bottom_right). Pick points on the *field plane* (tape intersections, corners, marked vertices) and avoid robots/occlusions.
+- **Image points** are pixel coordinates on each camera crop (top). Pick points on the *field plane* (tape intersections, corners, marked vertices) and avoid robots/occlusions.
 - **Field points** are the matching coordinates on the top-down field canvas (same real-world locations as the image points).
 - Add at least **4 well-spread point pairs per view**, keeping the order aligned between image and field lists.
 - After adjusting points, run calibration to generate `calib.json`, then continue rendering.
@@ -291,11 +289,7 @@ def main(argv: list[str] | None = None) -> None:
         [
             "broadcast",
             "top crop",
-            "bottom_left crop",
-            "bottom_right crop",
             "warped top",
-            "warped bottom_left",
-            "warped bottom_right",
             "stitched",
         ],
     )

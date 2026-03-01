@@ -14,7 +14,7 @@ from chevron.ui.verify_app import (
 def test_overlay_helpers_keep_shape_and_change_pixels():
     frame = np.zeros((80, 120, 3), dtype=np.uint8)
     rois = {"start": [5, 5, 30, 20], "stop": [50, 8, 25, 18]}
-    crops = {"top": [0, 0, 120, 40], "bottom_left": [0, 40, 60, 40], "bottom_right": [60, 40, 60, 40]}
+    crops = {"top": [0, 0, 120, 80]}
     pts = [[10, 10], [40, 12], [45, 30], [12, 28], [25, 20]]
 
     out = draw_rois(frame, rois)
@@ -84,7 +84,7 @@ def test_resolve_selected_image_handles_missing_crop():
     crop_displays = {"top": np.ones((10, 10, 3), dtype=np.uint8)}
     warped = {}
 
-    selected = resolve_selected_image("bottom_right crop", broadcast, crop_displays, warped, None)
+    selected = resolve_selected_image("warped top", broadcast, crop_displays, warped, None)
 
     assert selected is None
 
@@ -98,13 +98,6 @@ def test_compute_homographies_skips_incomplete_views():
                     "image_points": [[0, 0], [1, 0], [1, 1], [0, 1]],
                     "field_points": [[0, 0], [2, 0], [2, 2], [0, 2]],
                 },
-                "bottom_left": {
-                    "image_points": [[0, 0], [1, 0], [1, 1]],
-                    "field_points": [[0, 0], [2, 0], [2, 2]],
-                },
-                "bottom_right": {
-                    "image_points": [[0, 0], [1, 0], [1, 1], [0, 1]],
-                },
             }
         }
     }
@@ -112,8 +105,6 @@ def test_compute_homographies_skips_incomplete_views():
     hs = compute_homographies(cfg, calib_data=None)
 
     assert "top" in hs
-    assert "bottom_left" not in hs
-    assert "bottom_right" not in hs
 
 
 def test_compute_homographies_merges_calib_with_config_fallbacks():
@@ -123,10 +114,6 @@ def test_compute_homographies_merges_calib_with_config_fallbacks():
                 "top": {
                     "image_points": [[0, 0], [1, 0], [1, 1], [0, 1]],
                     "field_points": [[0, 0], [2, 0], [2, 2], [0, 2]],
-                },
-                "bottom_left": {
-                    "image_points": [[0, 0], [1, 0], [1, 1], [0, 1]],
-                    "field_points": [[0, 0], [3, 0], [3, 3], [0, 3]],
                 },
             }
         }
@@ -140,9 +127,7 @@ def test_compute_homographies_merges_calib_with_config_fallbacks():
     hs = compute_homographies(cfg, calib_data=calib_data)
 
     assert "top" in hs
-    assert "bottom_left" in hs
     assert hs["top"].shape == (3, 3)
-    assert hs["bottom_left"].shape == (3, 3)
 
 
 def test_compute_homographies_prefers_calib_when_not_preferring_correspondences():

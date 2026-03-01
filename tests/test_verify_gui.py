@@ -57,17 +57,15 @@ def test_run_local_verify_includes_precalibrated_views_in_sequential_order(monke
     monkeypatch.setattr(
         "chevron.ui.verify_gui.get_layout",
         lambda *_args, **_kwargs: {
-            "top": [0, 0, 120, 30],
-            "bottom_left": [0, 30, 60, 60],
-            "bottom_right": [60, 30, 60, 60],
+            "top": [0, 0, 120, 90],
         },
     )
-    _stub_cv2_gui(monkeypatch, [ord("q"), ord("q"), ord("q")])
+    _stub_cv2_gui(monkeypatch, [ord("q")])
 
     result = run_local_verify("video.mp4", "config.yml", out_json, frame_idx=7)
 
     stdout = capsys.readouterr().out
-    assert "sequential verify order -> top, bottom_right, bottom_left" in stdout
+    assert "sequential verify order -> top" in stdout
     assert "calibrating view -> top" in stdout
     assert len(result["top"]["image_points"]) == 4
 
@@ -84,19 +82,15 @@ def test_run_local_verify_q_advances_instead_of_quitting(monkeypatch, tmp_path, 
     monkeypatch.setattr(
         "chevron.ui.verify_gui.get_layout",
         lambda *_args, **_kwargs: {
-            "top": [0, 0, 120, 20],
-            "bottom_left": [0, 20, 60, 60],
-            "bottom_right": [60, 20, 60, 60],
+            "top": [0, 0, 120, 80],
         },
     )
-    _stub_cv2_gui(monkeypatch, [ord("q"), ord("q"), ord("q")])
+    _stub_cv2_gui(monkeypatch, [ord("q")])
 
     run_local_verify("video.mp4", "config.yml", out_json, frame_idx=0)
 
     stdout = capsys.readouterr().out
     assert "calibrating view -> top" in stdout
-    assert "calibrating view -> bottom_right" in stdout
-    assert "calibrating view -> bottom_left" in stdout
 
 
 def test_run_local_verify_supports_skip_shortcut(monkeypatch, tmp_path, capsys):
@@ -124,12 +118,10 @@ def test_run_local_verify_supports_skip_shortcut(monkeypatch, tmp_path, capsys):
     monkeypatch.setattr(
         "chevron.ui.verify_gui.get_layout",
         lambda *_args, **_kwargs: {
-            "top": [0, 0, 120, 20],
-            "bottom_left": [0, 20, 60, 60],
-            "bottom_right": [60, 20, 60, 60],
+            "top": [0, 0, 120, 80],
         },
     )
-    _stub_cv2_gui(monkeypatch, [ord("s"), ord("q"), ord("q")])
+    _stub_cv2_gui(monkeypatch, [ord("s")])
 
     result = run_local_verify("video.mp4", "config.yml", out_json, frame_idx=0)
 

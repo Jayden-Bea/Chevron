@@ -199,30 +199,163 @@ def test_log_includes_absolute_and_relative_timestamps(capsys):
     assert re.search(r"^\[\d{4}-\d{2}-\d{2}T.*Z \+\s*\d+\.\d{2}s\]", captured)
 
 
-def test_detect_parser_accepts_reference_path():
+def test_detect_parser_accepts_detection_options():
     parser = build_parser()
 
     args = parser.parse_args([
         "detect",
+        "--video-dir",
+        "inputs/matches",
         "--out",
         "out_dir/detect",
         "--reference",
         "fixtures/fuel.png",
+        "--threshold",
+        "0.6",
+        "--scale-min",
+        "0.8",
+        "--scale-max",
+        "1.4",
+        "--scale-steps",
+        "20",
+        "--nms-iou-threshold",
+        "0.2",
+        "--max-detections-per-frame",
+        "500",
+        "--max-candidates-per-scale",
+        "600",
+        "--config",
+        "configs/example_config.yml",
+        "--combine",
+        "--preview",
     ])
 
+    assert args.video_dir == "inputs/matches"
     assert args.out == "out_dir/detect"
     assert args.reference == "fixtures/fuel.png"
+    assert args.threshold == 0.6
+    assert args.scale_min == 0.8
+    assert args.scale_max == 1.4
+    assert args.scale_steps == 20
+    assert args.nms_iou_threshold == 0.2
+    assert args.max_detections_per_frame == 500
+    assert args.max_candidates_per_scale == 600
+    assert args.config == "configs/example_config.yml"
+    assert args.combine is True
+    assert args.preview is True
 
 
-def test_cmd_detect_writes_state_and_reference(tmp_path):
-    ref = tmp_path / "input_reference.png"
-    ref.write_bytes(b"reference-image")
-    out = tmp_path / "detect_out"
+def test_cmd_detect_invokes_detection_pipeline(tmp_path):
+    import sys
+    import types
 
-    cmd_detect(type("Args", (), {"out": str(out), "reference": str(ref)})())
+    captured = {}
 
-    saved_ref = out / "reference" / "fuel_element_reference.png"
-    assert saved_ref.read_bytes() == b"reference-image"
+    class FakeSettings:
+        def __init__(
+            self,
+            threshold,
+            scale_min,
+            scale_max,
+            scale_steps,
+            nms_iou_threshold,
+            max_detections_per_frame,
+            max_candidates_per_scale,
+        ):
+            self.threshold = threshold
+            self.scale_min = scale_min
+            self.scale_max = scale_max
+            self.scale_steps = scale_steps
+            self.nms_iou_threshold = nms_iou_threshold
+            self.max_detections_per_frame = max_detections_per_frame
+            self.max_candidates_per_scale = max_candidates_per_scale
 
-    state_path = out / "detect_state.json"
-    assert state_path.exists()
+    def fake_detect_fuel(video_dir, reference_image, out_dir, settings, show_preview, combine):
+        captured["video_dir"] = video_dir
+        captured["reference_image"] = reference_image
+        captured["out_dir"] = out_dir
+        captured["settings"] = settings
+        captured["show_preview"] = show_preview
+        captured["combine"] = combine
+        return {"outputs": {"counts_json": "counts.json"}, "combined_outputs": {"map_png": "combined.png"}}
+
+    fake_module = types.SimpleNamespace(DetectionSettings=FakeSettings, detect_fuel=fake_detect_fuel)
+    sys.modules["chevron.detect"] = fake_module
+
+    args = type(
+        "Args",
+        (),
+        {
+            "video_dir": str(tmp_path / "videos"),
+            "reference": str(tmp_path / "reference.png"),
+            "out": str(tmp_path / "out"),
+            "threshold": 0.58,
+            "scale_min": 0.75,
+            "scale_max": 1.25,
+            "scale_steps": 12,
+            "nms_iou_threshold": 0.22,
+            "max_detections_per_frame": 333,
+            "max_candidates_per_scale": 444,
+            "preview": True,
+            "combine": True,
+            "config": None,
+        },
+    )()
+
+    cmd_detect(args)
+
+    assert captured["video_dir"] == str(tmp_path / "videos")
+    assert captured["reference_image"] == str(tmp_path / "reference.png")
+    assert captured["out_dir"] == str(tmp_path / "out")
+    assert captured["show_preview"] is True
+    assert captured["combine"] is True
+    assert captured["settings"].threshold == 0.58
+    assert captured["settings"].scale_min == 0.75
+    assert captured["settings"].scale_max == 1.25
+    assert captured["settings"].scale_steps == 12
+    assert captured["settings"].nms_iou_threshold == 0.22
+    assert captured["settings"].max_detections_per_frame == 333
+    assert captured["settings"].max_candidates_per_scale == 444
+
+
+def test_cmd_detect_uses_config_overrides(monkeypatch, tmp_path):
+    captured = {}
+
+    class FakeSettings:
+        def __init__(self, **kwargs):
+            for k, v in kwargs.items():
+                setattr(self, k, v)
+
+    def fake_detect_fuel(video_dir, reference_image, out_dir, settings, show_preview, combine):
+        captured["settings"] = settings
+        captured["combine"] = combine
+        return {"outputs": {}}
+
+    monkeypatch.setattr("chevron.cli.load_config", lambda _p: {"detect": {"threshold": 0.9, "scale_steps": 3}})
+
+    import sys, types
+    fake_module = types.SimpleNamespace(DetectionSettings=FakeSettings, detect_fuel=fake_detect_fuel)
+    sys.modules["chevron.detect"] = fake_module
+
+    args = type("Args", (), {
+        "video_dir": str(tmp_path / "videos"),
+        "reference": str(tmp_path / "reference.png"),
+        "out": str(tmp_path / "out"),
+        "threshold": 0.58,
+        "scale_min": 0.75,
+        "scale_max": 1.25,
+        "scale_steps": 12,
+        "nms_iou_threshold": 0.22,
+        "max_detections_per_frame": 333,
+        "max_candidates_per_scale": 444,
+        "preview": False,
+        "combine": False,
+        "config": "cfg.yml",
+    })()
+
+    cmd_detect(args)
+
+    assert captured["settings"].threshold == 0.9
+    assert captured["settings"].scale_steps == 3
+    assert captured["settings"].scale_min == 0.75
+    assert captured["combine"] is False

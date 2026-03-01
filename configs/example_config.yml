@@ -19,9 +19,7 @@ debounce:
   max_match_s: 220.0
 split:
   crops:
-    top: [0, 0, 2047, 819]
-    bottom_left: [0, 820, 1008, 1278]
-    bottom_right: [1040, 820, 2047, 1278]
+    top: [0, 0, 2047, 1278]
 field:
   width_units: 16.46
   height_units: 8.23
@@ -32,12 +30,6 @@ calibration:
     top:
       image_points: [[0,0], [1919,0], [1919,539], [0,539]]
       field_points: [[0,0], [1975,0], [1975,987], [0,987]]
-    bottom_left:
-      image_points: [[0,0], [959,0], [959,539], [0,539]]
-      field_points: [[0,0], [987,0], [987,987], [0,987]]
-    bottom_right:
-      image_points: [[0,0], [959,0], [959,539], [0,539]]
-      field_points: [[987,0], [1975,0], [1975,987], [987,987]]
 segment:
   # template (legacy): start/stop image matching inside ROIs
   # audio_cue: detect starts by matching a horn/audio cue, then cut fixed-length matches
@@ -64,3 +56,13 @@ monitoring:
 
 processing:
   output_fps: 10
+
+
+detect:
+  threshold: 0.58
+  scale_min: 0.75
+  scale_max: 1.25
+  scale_steps: 12
+  nms_iou_threshold: 0.25
+  max_detections_per_frame: 300
+  max_candidates_per_scale: 400

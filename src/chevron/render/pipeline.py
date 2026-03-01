@@ -42,7 +42,7 @@ def render_matches(
     outputs = []
     safe_interval_s = max(0.1, float(progress_interval_s))
 
-    view_order = ["top", "bottom_left", "bottom_right"]
+    view_order = ["top"]
 
     for i, seg in enumerate(segments, start=1):
         match_dir = ensure_dir(out / f"match_{i:03d}")
