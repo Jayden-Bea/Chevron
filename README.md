@@ -5,7 +5,7 @@
 ## Scope
 
 Implemented focus:
-- Ingest YouTube/local video and normalize to proxy MP4.
+- Ingest YouTube/local video and produce an OpenCV-friendly H.264 proxy MP4 when possible.
 - Detect match boundaries using template matching + debounce state machine OR audio cue matching + fixed match length.
 - Split default 3-view broadcast layout (top, bottom-left, bottom-right).
 - Calibrate per-view homographies from manual correspondences in config.
@@ -83,6 +83,8 @@ If YouTube blocks anonymous download attempts (403 / "sign in to confirm you're 
 
 
 Chevron automatically shuffles YouTube client and user-agent fallback strategies during ingest, so most users should not need to pass low-level yt-dlp flags manually.
+Chevron also prefers H.264/AVC video formats during yt-dlp selection so the generated `proxy.mp4` is directly decodable by OpenCV on more systems.
+
 
 1. Sign in to YouTube in your browser.
 2. Open browser DevTools → **Network** tab and reload `youtube.com`.
@@ -209,6 +211,8 @@ Debug artifacts:
   - in `audio_cue` mode, increase `audio_cue.threshold` and/or `audio_cue.min_separation_s`.
 - **Segments are too short/long in audio mode**:
   - adjust `segment.match_length_s` to your event timing.
+- **AV1 decode / frame-0 read failures in verify/calibrate**:
+  - Chevron now requests H.264-first formats from yt-dlp. If your source is still AV1-only, transcode once with `ffmpeg -i input.mp4 -c:v libx264 -pix_fmt yuv420p -an fixed.mp4` and ingest `fixed.mp4`.
 - **Warp looks stretched**:
   - add better-distributed correspondence points.
   - verify field coordinate units and `px_per_unit`.
