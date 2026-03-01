@@ -61,7 +61,9 @@ def run_local_verify(video: str, config: str, out_json: str | Path, frame_idx: i
 
     for view in VIEW_ORDER:
         if view not in layout:
+            print(f"[chevron] verify(local): skipping missing view in split layout -> {view}")
             continue
+        print(f"[chevron] verify(local): calibrating view -> {view}")
         x, y, cw, ch = layout[view]
         crop = frame[y : y + ch, x : x + cw].copy()
         field_canvas = _build_field_canvas(canvas_w, canvas_h)
