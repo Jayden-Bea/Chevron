@@ -3,10 +3,8 @@ from __future__ import annotations
 import re
 import shutil
 import subprocess
-import sys
 from collections.abc import Callable
 from dataclasses import dataclass
-from getpass import getpass
 from pathlib import Path
 from shutil import which
 
@@ -153,25 +151,6 @@ def _normalize_youtube_cookie_header(raw_value: str | None) -> str | None:
         return None
 
     return value or None
-
-
-
-
-def _prompt_for_youtube_cookie_header(logger: Callable[[str], None] | None = None) -> str | None:
-    if not sys.stdin.isatty():
-        return None
-
-    if logger:
-        logger(
-            "All automatic YouTube download strategies failed. "
-            "As a final fallback, provide your YouTube Cookie header from a logged-in browser session. "
-            "If DevTools shows 'Provisional headers are shown' and no Cookie row, use DevTools -> Application/Storage -> Cookies -> https://www.youtube.com and copy key=value pairs, "
-            "or copy request headers and paste the full text so Chevron can extract the Cookie line."
-        )
-
-    cookie_header = getpass("Paste YouTube Cookie value (or a full header block) and press Enter (leave blank to skip): ")
-    return _normalize_youtube_cookie_header(cookie_header)
-
 
 def _attempt_manual_cookie_download(
     url: str,
@@ -326,37 +305,11 @@ def _download_youtube(
                 logger(f"Ingest {_colored('failed', _RED)}.")
             continue
 
-    if _should_offer_manual_auth_fallback(attempts):
-        cookie_header = _prompt_for_youtube_cookie_header(logger=logger)
-        if cookie_header:
-            try:
-                latest = _attempt_manual_cookie_download(url, output_tmpl, cache_dir, cookie_header)
-                attempts.append({"strategy": "manual_cookie_header", "status": "success", "returncode": 0})
-                if logger:
-                    logger(f"Ingest {_colored('succeeded', _GREEN)} using manual Cookie header fallback.")
-                return YouTubeDownloadResult(
-                    source_path=latest,
-                    successful_strategy="manual_cookie_header",
-                    successful_strategy_args=["--add-header", "Cookie: [REDACTED]"],
-                    attempts=attempts,
-                )
-            except FileNotFoundError as err:
-                raise RuntimeError(
-                    "yt-dlp is required for URL ingestion but was not found on PATH. "
-                    "Install yt-dlp and retry, or use --video with a local file."
-                ) from err
-            except subprocess.CalledProcessError as err:
-                message = "\n".join([err.stdout or "", err.stderr or ""])
-                attempts.append(
-                    {
-                        "strategy": "manual_cookie_header",
-                        "status": "failed",
-                        "returncode": int(err.returncode),
-                        "error": message.strip() or "unknown yt-dlp failure",
-                    }
-                )
-                if logger:
-                    logger(f"Manual auth fallback {_colored('failed', _RED)}.")
+    if _should_offer_manual_auth_fallback(attempts) and logger:
+        logger(
+            "Authentication-related YouTube failures were detected. "
+            "Provide --youtube-cookies-file, --youtube-cookies-from-browser, or --youtube-cookie to retry with authenticated access."
+        )
 
     last_error = attempts[-1].get("error", "unknown yt-dlp failure") if attempts else "unknown yt-dlp failure"
     raise RuntimeError(
