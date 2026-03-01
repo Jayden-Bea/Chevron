@@ -18,6 +18,68 @@ _GREEN = "\x1b[32m"
 _RESET = "\x1b[0m"
 _DEFAULT_YOUTUBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
+_YTDLP_MIN_VERSION = "2026.02.28"
+
+
+def _parse_yt_dlp_version(version_text: str) -> tuple[int, int, int] | None:
+    match = re.search(r"(\d{4})\.(\d{2})\.(\d{2})", version_text)
+    if not match:
+        return None
+    return tuple(int(part) for part in match.groups())
+
+
+def _ensure_yt_dlp_minimum_version(minimum_version: str = _YTDLP_MIN_VERSION) -> tuple[str, tuple[int, int, int]]:
+    cmd = ["yt-dlp", "--version"]
+    try:
+        completed = subprocess.run(cmd, check=True, text=True, capture_output=True)
+    except FileNotFoundError as err:
+        raise RuntimeError(
+            "yt-dlp is required for URL ingestion but was not found on PATH. "
+            "Install yt-dlp and retry, or use --video with a local file."
+        ) from err
+    except subprocess.CalledProcessError as err:
+        stderr = (err.stderr or "").strip()
+        raise RuntimeError(f"Failed to determine yt-dlp version: {stderr or err}") from err
+
+    resolved = (completed.stdout or "").strip().splitlines()
+    resolved_version = resolved[-1].strip() if resolved else "unknown"
+    resolved_tuple = _parse_yt_dlp_version(resolved_version)
+    minimum_tuple = _parse_yt_dlp_version(minimum_version)
+
+    if resolved_tuple is None or minimum_tuple is None:
+        raise RuntimeError(
+            "Unable to parse yt-dlp version output. "
+            f"Expected YYYY.MM.DD, got '{resolved_version}'."
+        )
+
+    if resolved_tuple < minimum_tuple:
+        raise RuntimeError(
+            "Chevron requires a newer yt-dlp build for resilient YouTube ingestion. "
+            f"Found {resolved_version}, require >= {minimum_version}. "
+            "Please update with `pip install -U yt-dlp` and retry."
+        )
+
+    return resolved_version, resolved_tuple
+
+
+def _truncate_for_log(text: str, max_chars: int = 400) -> str:
+    if len(text) <= max_chars:
+        return text
+    return text[:max_chars].rstrip() + "... [truncated]"
+
+
+def _format_ytdlp_error_for_log(err: subprocess.CalledProcessError) -> str:
+    stdout = (err.stdout or "").strip()
+    stderr = (err.stderr or "").strip()
+    parts = []
+    if stderr:
+        parts.append(f"stderr={_truncate_for_log(stderr)}")
+    if stdout:
+        parts.append(f"stdout={_truncate_for_log(stdout)}")
+    if not parts:
+        parts.append("no stdout/stderr captured")
+    return "; ".join(parts)
+
 
 def _colored(text: str, color: str) -> str:
     return f"{color}{text}{_RESET}"
@@ -255,6 +317,13 @@ def _download_youtube(
             },
             *strategies,
         ]
+    resolved_ytdlp_version, _ = _ensure_yt_dlp_minimum_version()
+    if logger:
+        logger(
+            "Using yt-dlp version "
+            f"{resolved_ytdlp_version} (minimum required: {_YTDLP_MIN_VERSION})."
+        )
+
     attempts: list[dict[str, str | int]] = []
     video_title = _resolve_youtube_title(url)
 
@@ -288,7 +357,10 @@ def _download_youtube(
                 }
             )
             if logger:
-                logger("Provided Cookie header failed; retrying automatic YouTube strategies.")
+                logger(
+                    "Provided Cookie header failed; retrying automatic YouTube strategies. "
+                    f"returncode={err.returncode} details={_format_ytdlp_error_for_log(err)}"
+                )
 
     elif youtube_cookie_header and logger:
         logger("Provided --youtube-cookie value did not contain a usable Cookie header; retrying automatic YouTube strategies.")
@@ -300,8 +372,10 @@ def _download_youtube(
 
         if logger:
             logger(
-                "Attempting to ingest youtube video "
-                f"{video_title} with the following settings:\n{strategy['args'] or '[]'}"
+                "Attempting YouTube ingest "
+                f"strategy={strategy['name']} "
+                f"video={video_title!r} "
+                f"args={strategy['args'] or '[]'}"
             )
 
         try:
@@ -333,7 +407,11 @@ def _download_youtube(
                 }
             )
             if logger:
-                logger(f"Ingest {_colored('failed', _RED)}.")
+                logger(
+                    f"Ingest {_colored('failed', _RED)} "
+                    f"strategy={strategy['name']} returncode={err.returncode}."
+                )
+                logger(f"yt-dlp failure details: {_format_ytdlp_error_for_log(err)}")
             continue
 
     if _should_offer_manual_auth_fallback(attempts) and logger:
