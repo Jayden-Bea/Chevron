@@ -283,9 +283,10 @@ def _download_youtube(
     youtube_cookie_header: str | None = None,
     youtube_cookies_from_browser: str | None = None,
     youtube_cookies_file: str | Path | None = None,
+    output_path: Path | None = None,
 ) -> YouTubeDownloadResult:
     cache_dir.mkdir(parents=True, exist_ok=True)
-    output_tmpl = str(cache_dir / "%(id)s.%(ext)s")
+    output_tmpl = str(output_path) if output_path else str(cache_dir / "%(id)s.%(ext)s")
 
     strategies = _shuffle_youtube_strategies(url, _youtube_download_strategies())
     if youtube_cookies_from_browser:
@@ -466,22 +467,25 @@ def ingest(
             youtube_cookie_header=youtube_cookie_header,
             youtube_cookies_from_browser=youtube_cookies_from_browser,
             youtube_cookies_file=youtube_cookies_file,
+            output_path=proxy_path,
         )
-        src = download_result.source_path
+        source_path = download_result.source_path
     elif video:
         src = Path(video)
+        source_path = source_dir / src.name
+        if src != source_path:
+            shutil.copy2(src, source_path)
+
+        if source_path.suffix.lower() == ".mp4":
+            shutil.copy2(source_path, proxy_path)
+        else:
+            normalize_video(source_path, proxy_path, fps=fps)
         download_result = None
     else:
         raise ValueError("One of url or video must be provided")
 
-    source_copy = source_dir / src.name
-    if src != source_copy:
-        shutil.copy2(src, source_copy)
-
-    normalize_video(source_copy, proxy_path, fps=fps)
-
     meta = {
-        "source": str(source_copy),
+        "source": str(source_path),
         "proxy": str(proxy_path),
         "fps": fps,
     }
