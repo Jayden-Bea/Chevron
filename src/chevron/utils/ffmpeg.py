@@ -22,3 +22,18 @@ def normalize_video(in_path: str | Path, out_path: str | Path, fps: int = 30) ->
         "yuv420p",
         str(out_path),
     ])
+
+
+def crop_video(in_path: str | Path, out_path: str | Path, x: int, y: int, w: int, h: int) -> None:
+    run_ffmpeg([
+        "-i",
+        str(in_path),
+        "-vf",
+        f"crop={int(w)}:{int(h)}:{int(x)}:{int(y)}",
+        "-an",
+        "-c:v",
+        "libx264",
+        "-pix_fmt",
+        "yuv420p",
+        str(out_path),
+    ])
