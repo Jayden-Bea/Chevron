@@ -318,3 +318,64 @@ def test_download_youtube_falls_back_after_user_browser_cookies_failure(monkeypa
     assert result.successful_strategy == "default"
     assert result.attempts[0]["strategy"] == "user_browser_cookies_edge"
     assert result.attempts[0]["status"] == "failed"
+
+
+def test_download_youtube_prefers_user_cookies_file_strategy(monkeypatch, tmp_path: Path):
+    calls: list[list[str]] = []
+    cookies_file = tmp_path / "cookies.txt"
+    cookies_file.write_text("# Netscape HTTP Cookie File\n", encoding="utf-8")
+
+    def fake_run(cmd, check, text, capture_output):
+        calls.append(cmd)
+        out_file = tmp_path / "cookies_file.mp4"
+        out_file.write_bytes(b"video")
+        return None
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = _download_youtube(
+        "https://youtube.com/watch?v=abc123",
+        tmp_path,
+        youtube_cookies_file=cookies_file,
+    )
+
+    assert result.successful_strategy == "user_cookies_file"
+    assert result.successful_strategy_args == [
+        "--extractor-args",
+        "youtube:player_client=web",
+        "--cookies",
+        str(cookies_file),
+    ]
+    assert "--cookies" in calls[0]
+
+
+def test_download_youtube_raises_for_missing_user_cookies_file(tmp_path: Path):
+    with pytest.raises(RuntimeError, match="does not exist"):
+        _download_youtube(
+            "https://youtube.com/watch?v=abc123",
+            tmp_path,
+            youtube_cookies_file=tmp_path / "missing_cookies.txt",
+        )
+
+
+def test_download_youtube_accepts_browser_profile_spec(monkeypatch, tmp_path: Path):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, check, text, capture_output):
+        calls.append(cmd)
+        out_file = tmp_path / "browser_profile.mp4"
+        out_file.write_bytes(b"video")
+        return None
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = _download_youtube(
+        "https://youtube.com/watch?v=abc123",
+        tmp_path,
+        youtube_cookies_from_browser="chrome:Default",
+    )
+
+    assert result.successful_strategy == "user_browser_cookies_chrome"
+    assert "chrome:Default" in calls[0]

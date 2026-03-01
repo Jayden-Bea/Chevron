@@ -203,26 +203,48 @@ def _download_youtube(
     logger: Callable[[str], None] | None = None,
     youtube_cookie_header: str | None = None,
     youtube_cookies_from_browser: str | None = None,
+    youtube_cookies_file: str | Path | None = None,
 ) -> YouTubeDownloadResult:
     cache_dir.mkdir(parents=True, exist_ok=True)
     output_tmpl = str(cache_dir / "%(id)s.%(ext)s")
 
     strategies = _youtube_download_strategies()
     if youtube_cookies_from_browser:
-        browser = str(youtube_cookies_from_browser).strip().lower()
-        if browser:
+        browser_spec = str(youtube_cookies_from_browser).strip()
+        if browser_spec:
+            browser_name = browser_spec.split(":", 1)[0].split("+", 1)[0].strip().lower() or "browser"
             strategies = [
                 {
-                    "name": f"user_browser_cookies_{browser}",
+                    "name": f"user_browser_cookies_{browser_name}",
                     "args": [
                         "--extractor-args",
                         "youtube:player_client=web",
                         "--cookies-from-browser",
-                        browser,
+                        browser_spec,
                     ],
                 },
                 *strategies,
             ]
+
+    if youtube_cookies_file:
+        cookies_path = Path(youtube_cookies_file).expanduser()
+        if not cookies_path.exists() or not cookies_path.is_file():
+            raise RuntimeError(
+                "The provided YouTube cookies file does not exist or is not a file: "
+                f"{cookies_path}"
+            )
+        strategies = [
+            {
+                "name": "user_cookies_file",
+                "args": [
+                    "--extractor-args",
+                    "youtube:player_client=web",
+                    "--cookies",
+                    str(cookies_path),
+                ],
+            },
+            *strategies,
+        ]
     attempts: list[dict[str, str | int]] = []
     video_title = _resolve_youtube_title(url)
 
@@ -351,6 +373,7 @@ def ingest(
     logger: Callable[[str], None] | None = None,
     youtube_cookie_header: str | None = None,
     youtube_cookies_from_browser: str | None = None,
+    youtube_cookies_file: str | Path | None = None,
 ) -> dict:
     out = ensure_dir(out_dir)
     source_dir = ensure_dir(out / "source")
@@ -363,6 +386,7 @@ def ingest(
             logger=logger,
             youtube_cookie_header=youtube_cookie_header,
             youtube_cookies_from_browser=youtube_cookies_from_browser,
+            youtube_cookies_file=youtube_cookies_file,
         )
         src = download_result.source_path
     elif video:

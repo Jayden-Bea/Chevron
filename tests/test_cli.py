@@ -181,6 +181,8 @@ def test_ingest_parser_accepts_capture_area_selection_flags():
         "SID=fake",
         "--youtube-cookies-from-browser",
         "chrome",
+        "--youtube-cookies-file",
+        "cookies.txt",
         "--select-capture-area",
         "--capture-area-out",
         "workdir/custom_capture_area.json",
@@ -188,6 +190,7 @@ def test_ingest_parser_accepts_capture_area_selection_flags():
 
     assert args.youtube_cookie == "SID=fake"
     assert args.youtube_cookies_from_browser == "chrome"
+    assert args.youtube_cookies_file == "cookies.txt"
     assert args.select_capture_area is True
     assert args.capture_area_out == "workdir/custom_capture_area.json"
 
@@ -199,7 +202,7 @@ def test_cmd_ingest_runs_capture_area_selector_when_enabled(monkeypatch, tmp_pat
 
     captured = {}
 
-    def fake_ingest(url, video, out_dir, fps, logger=None, youtube_cookie_header=None, youtube_cookies_from_browser=None):
+    def fake_ingest(url, video, out_dir, fps, logger=None, youtube_cookie_header=None, youtube_cookies_from_browser=None, youtube_cookies_file=None):
         proxy = tmp_path / "proxy.mp4"
         proxy.write_bytes(b"fake")
         return {"proxy": str(proxy)}
@@ -225,6 +228,7 @@ def test_cmd_ingest_runs_capture_area_selector_when_enabled(monkeypatch, tmp_pat
         capture_area_out=None,
         youtube_cookie=None,
         youtube_cookies_from_browser=None,
+        youtube_cookies_file=None,
     )
 
     cmd_ingest(args)
@@ -279,10 +283,13 @@ def test_run_parser_accepts_youtube_cookie():
         "SID=fake",
         "--youtube-cookies-from-browser",
         "chrome",
+        "--youtube-cookies-file",
+        "cookies.txt",
     ])
 
     assert args.youtube_cookie == "SID=fake"
     assert args.youtube_cookies_from_browser == "chrome"
+    assert args.youtube_cookies_file == "cookies.txt"
 
 
 def test_cmd_run_uses_full_proxy_for_raw_export_and_cropped_video_for_pipeline(monkeypatch, tmp_path):
@@ -307,7 +314,7 @@ def test_cmd_run_uses_full_proxy_for_raw_export_and_cropped_video_for_pipeline(m
 
     calls = {}
 
-    def fake_ingest(url, video, out_dir, fps, logger=None, youtube_cookie_header=None, youtube_cookies_from_browser=None):
+    def fake_ingest(url, video, out_dir, fps, logger=None, youtube_cookie_header=None, youtube_cookies_from_browser=None, youtube_cookies_file=None):
         return {"proxy": str(proxy)}
 
     def fake_detect_segments(video, cfg, out, debug_dir, progress_interval_s, progress_callback):
@@ -351,6 +358,7 @@ def test_cmd_run_uses_full_proxy_for_raw_export_and_cropped_video_for_pipeline(m
         verify_browser=False,
         youtube_cookie=None,
         youtube_cookies_from_browser=None,
+        youtube_cookies_file=None,
     )
 
     cmd_run(args)

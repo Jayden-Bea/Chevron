@@ -202,6 +202,7 @@ def cmd_ingest(args):
     _log("[chevron] ingest: starting")
     cookie_header = os.getenv("CHEVRON_YOUTUBE_COOKIE")
     cookies_from_browser = os.getenv("CHEVRON_YOUTUBE_BROWSER")
+    cookies_file = os.getenv("CHEVRON_YOUTUBE_COOKIES_FILE")
     meta = ingest(
         url=args.url,
         video=args.video,
@@ -210,6 +211,7 @@ def cmd_ingest(args):
         logger=_log,
         youtube_cookie_header=args.youtube_cookie or cookie_header,
         youtube_cookies_from_browser=args.youtube_cookies_from_browser or cookies_from_browser,
+        youtube_cookies_file=args.youtube_cookies_file or cookies_file,
     )
 
     if args.select_capture_area:
@@ -401,6 +403,7 @@ def cmd_run(args):
         _log("[chevron] run: ingest stage")
         cookie_header = os.getenv("CHEVRON_YOUTUBE_COOKIE")
         cookies_from_browser = os.getenv("CHEVRON_YOUTUBE_BROWSER")
+        cookies_file = os.getenv("CHEVRON_YOUTUBE_COOKIES_FILE")
         ingest_meta = ingest(
             url=args.url,
             video=args.video,
@@ -409,6 +412,7 @@ def cmd_run(args):
             logger=_log,
             youtube_cookie_header=args.youtube_cookie or cookie_header,
             youtube_cookies_from_browser=args.youtube_cookies_from_browser or cookies_from_browser,
+            youtube_cookies_file=args.youtube_cookies_file or cookies_file,
         )
         _write_run_status(run_status_path, "ingest_complete", {"proxy": ingest_meta.get("proxy")})
     else:
@@ -521,7 +525,8 @@ def build_parser():
     s.add_argument("--out", required=True)
     s.add_argument("--fps", type=int, default=30)
     s.add_argument("--youtube-cookie", required=False, help="YouTube Cookie value (or pasted request headers containing Cookie:) from a logged-in browser session")
-    s.add_argument("--youtube-cookies-from-browser", required=False, help="Use yt-dlp browser cookies directly (examples: chrome, edge, firefox) for minimal setup")
+    s.add_argument("--youtube-cookies-from-browser", required=False, help="Use yt-dlp browser cookies directly (examples: chrome, edge, firefox, chrome:profile) for minimal setup")
+    s.add_argument("--youtube-cookies-file", required=False, help="Path to a Netscape-format cookies.txt export for robust YouTube auth fallback")
     s.add_argument("--select-capture-area", action="store_true")
     s.add_argument("--capture-area-out", required=False)
     s.set_defaults(func=cmd_ingest)
@@ -569,7 +574,8 @@ def build_parser():
     s.add_argument("--out", required=True)
     s.add_argument("--fps", type=int, default=30)
     s.add_argument("--youtube-cookie", required=False, help="YouTube Cookie value (or pasted request headers containing Cookie:) from a logged-in browser session")
-    s.add_argument("--youtube-cookies-from-browser", required=False, help="Use yt-dlp browser cookies directly (examples: chrome, edge, firefox) for minimal setup")
+    s.add_argument("--youtube-cookies-from-browser", required=False, help="Use yt-dlp browser cookies directly (examples: chrome, edge, firefox, chrome:profile) for minimal setup")
+    s.add_argument("--youtube-cookies-file", required=False, help="Path to a Netscape-format cookies.txt export for robust YouTube auth fallback")
     s.add_argument("--resume", dest="resume", action="store_true")
     s.add_argument("--no-resume", dest="resume", action="store_false")
     s.add_argument("--verify-port", type=int, default=8501)
