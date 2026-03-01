@@ -10,6 +10,8 @@ def test_is_retryable_ytdlp_error_matches_expected_messages():
     assert _is_retryable_ytdlp_error("ERROR: 403 Forbidden")
     assert _is_retryable_ytdlp_error("HTTP Error 403: Forbidden")
     assert _is_retryable_ytdlp_error("youtube client outdated")
+    assert _is_retryable_ytdlp_error("HTTP Error 429: Too Many Requests")
+    assert _is_retryable_ytdlp_error("Sign in to confirm you're not a bot")
     assert not _is_retryable_ytdlp_error("network timeout")
 
 
@@ -70,7 +72,7 @@ def test_download_youtube_raises_runtime_error_after_exhausting_retryable_client
 
     monkeypatch.setattr("subprocess.run", fake_run)
 
-    with pytest.raises(RuntimeError, match="trying multiple YouTube clients"):
+    with pytest.raises(RuntimeError, match="Last error"):
         _download_youtube("https://youtube.com/watch?v=abc123", tmp_path)
 
     assert len(calls) == 5
