@@ -273,7 +273,21 @@ def _attempt_manual_cookie_download(
         url,
     ]
     subprocess.run(cmd, check=True, text=True, capture_output=True)
-    return max(cache_dir.glob("*"), key=lambda p: p.stat().st_mtime)
+    return _resolve_downloaded_source(cache_dir, output_tmpl)
+
+
+def _resolve_downloaded_source(cache_dir: Path, output_tmpl: str) -> Path:
+    explicit_output = Path(output_tmpl)
+    if "%" not in output_tmpl and explicit_output.exists():
+        return explicit_output
+
+    candidates = list(cache_dir.glob("*"))
+    if not candidates:
+        raise RuntimeError(
+            "yt-dlp reported success but produced no output files. "
+            f"cache_dir={cache_dir} output_template={output_tmpl}"
+        )
+    return max(candidates, key=lambda p: p.stat().st_mtime)
 
 
 def _download_youtube(
@@ -393,7 +407,7 @@ def _download_youtube(
 
         try:
             subprocess.run(cmd, check=True, text=True, capture_output=True)
-            latest = max(cache_dir.glob("*"), key=lambda p: p.stat().st_mtime)
+            latest = _resolve_downloaded_source(cache_dir, output_tmpl)
             attempts.append({"strategy": strategy["name"], "status": "success", "returncode": 0})
             if logger:
                 logger(f"Ingest {_colored('succeeded', _GREEN)}.")

@@ -432,6 +432,42 @@ def test_download_youtube_uses_explicit_output_path(monkeypatch, tmp_path: Path)
     assert result.source_path == output_path
 
 
+def test_download_youtube_uses_explicit_output_path_outside_cache_dir(monkeypatch, tmp_path: Path):
+    cache_dir = tmp_path / "cache"
+    cache_dir.mkdir()
+    output_path = tmp_path / "workdir" / "proxy.mp4"
+    output_path.parent.mkdir()
+
+    def fake_run(cmd, check, text, capture_output):
+        output_path.write_bytes(b"video")
+        return None
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = _download_youtube(
+        "https://youtube.com/watch?v=abc123",
+        cache_dir,
+        output_path=output_path,
+    )
+
+    assert result.source_path == output_path
+
+
+def test_download_youtube_raises_when_success_has_no_output(monkeypatch, tmp_path: Path):
+    def fake_run(cmd, check, text, capture_output):
+        return None
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    with pytest.raises(RuntimeError, match="produced no output files"):
+        _download_youtube(
+            "https://youtube.com/watch?v=abc123",
+            tmp_path,
+        )
+
+
 def test_ingest_url_uses_downloaded_mp4_as_proxy_without_normalization(monkeypatch, tmp_path: Path):
     out_dir = tmp_path / "workdir"
     proxy_path = out_dir / "proxy.mp4"
