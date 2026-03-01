@@ -7,9 +7,9 @@ import numpy as np
 
 from chevron.split.layout import get_layout
 from chevron.utils.config import load_config
-from chevron.utils.io import write_json
+from chevron.utils.io import read_json, write_json
 
-VIEW_ORDER = ["top", "bottom_left", "bottom_right"]
+VIEW_ORDER = ["top", "bottom_right", "bottom_left"]
 
 
 def _draw_points(img: np.ndarray, points: list[list[float]], color: tuple[int, int, int], prefix: str) -> np.ndarray:
@@ -39,6 +39,18 @@ def _compute_homography(image_points: list[list[float]], field_points: list[list
     dst = np.asarray(field_points, dtype=np.float32)
     homography, _ = cv2.findHomography(src, dst, method=0)
     return homography
+
+
+def _save_correspondences(video: str, config: str, out_json: str | Path, frame_idx: int, correspondences: dict) -> None:
+    write_json(
+        out_json,
+        {
+            "video": str(video),
+            "config": str(config),
+            "frame_idx": int(frame_idx),
+            "correspondences": correspondences,
+        },
+    )
 
 
 def _render_single_frame_preview(
@@ -85,6 +97,11 @@ def run_local_verify(video: str, config: str, out_json: str | Path, frame_idx: i
     canvas_h = int(float(field.get("height_units", 8.23)) * float(field.get("px_per_unit", 120)))
 
     correspondences = ((cfg.get("calibration") or {}).get("correspondences") or {}).copy()
+    out_path = Path(out_json)
+    if out_path.exists():
+        persisted = read_json(out_path)
+        if isinstance(persisted, dict):
+            correspondences.update((persisted.get("correspondences") or {}))
     for view in VIEW_ORDER:
         pairs = correspondences.get(view) or {}
         correspondences[view] = {
@@ -93,11 +110,22 @@ def run_local_verify(video: str, config: str, out_json: str | Path, frame_idx: i
         }
 
     print("[chevron] verify(local): click IMAGE point in crop window, then matching FIELD point in field window.")
-    print("[chevron] verify(local): keys -> n/space(next view), u(undo pair), c(clear view), q(save+quit), esc(cancel)")
+    print("[chevron] verify(local): keys -> n/space(next view), u(undo pair), c(clear view), q(save+next), esc(cancel)")
 
-    views_to_verify = [view for view in VIEW_ORDER if view in layout]
+    views_to_verify = [
+        view
+        for view in VIEW_ORDER
+        if view in layout
+        and min(
+            len(correspondences.get(view, {}).get("image_points", [])),
+            len(correspondences.get(view, {}).get("field_points", [])),
+        )
+        < 4
+    ]
     if not views_to_verify:
-        raise RuntimeError("No verify views found in split layout.")
+        _save_correspondences(video, config, out_path, frame_idx, correspondences)
+        print("[chevron] verify(local): all views already calibrated; loaded saved correspondences.")
+        return correspondences
     print(f"[chevron] verify(local): sequential verify order -> {', '.join(views_to_verify)}")
 
     preview_win = "verify render preview"
@@ -169,32 +197,16 @@ def run_local_verify(video: str, config: str, out_json: str | Path, frame_idx: i
                 field_points.clear()
                 pending_image_point = None
             if key == ord("q"):
-                write_json(
-                    out_json,
-                    {
-                        "video": str(video),
-                        "config": str(config),
-                        "frame_idx": int(frame_idx),
-                        "correspondences": correspondences,
-                    },
-                )
-                cv2.destroyAllWindows()
-                return correspondences
+                _save_correspondences(video, config, out_path, frame_idx, correspondences)
+                break
             if key == 27:
                 cv2.destroyAllWindows()
                 raise RuntimeError("Verification cancelled by user")
 
         cv2.destroyWindow(crop_win)
         cv2.destroyWindow(field_win)
+        _save_correspondences(video, config, out_path, frame_idx, correspondences)
 
-    write_json(
-        out_json,
-        {
-            "video": str(video),
-            "config": str(config),
-            "frame_idx": int(frame_idx),
-            "correspondences": correspondences,
-        },
-    )
+    _save_correspondences(video, config, out_path, frame_idx, correspondences)
     cv2.destroyAllWindows()
     return correspondences
