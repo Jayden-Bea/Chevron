@@ -100,3 +100,48 @@ def test_detect_fuel_raises_when_no_videos(tmp_path):
         assert "No mp4 files found" in str(exc)
     else:
         raise AssertionError("Expected ValueError when video directory is empty")
+
+
+def test_detect_fuel_mixed_resolution_without_combine_does_not_fail(tmp_path):
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+
+    _write_test_video(video_dir / "match_001.mp4", frame_count=4)
+
+    writer = cv2.VideoWriter(str(video_dir / "match_002.mp4"), cv2.VideoWriter_fourcc(*"mp4v"), 8.0, (96, 72))
+    for _ in range(4):
+        frame = np.zeros((72, 96, 3), dtype=np.uint8)
+        cv2.rectangle(frame, (10, 20), (20, 30), (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+    reference = np.full((10, 10, 3), 255, dtype=np.uint8)
+    ref_path = tmp_path / "reference.png"
+    cv2.imwrite(str(ref_path), reference)
+
+    summary = detect_fuel(video_dir=video_dir, reference_image=ref_path, out_dir=tmp_path / "out", combine=False)
+
+    assert len(summary["per_match"]) == 2
+
+
+def test_detect_fuel_mixed_resolution_with_combine_skips_incompatible(tmp_path):
+    video_dir = tmp_path / "videos"
+    video_dir.mkdir()
+
+    _write_test_video(video_dir / "match_001.mp4", frame_count=4)
+
+    writer = cv2.VideoWriter(str(video_dir / "match_002.mp4"), cv2.VideoWriter_fourcc(*"mp4v"), 8.0, (96, 72))
+    for _ in range(4):
+        frame = np.zeros((72, 96, 3), dtype=np.uint8)
+        cv2.rectangle(frame, (10, 20), (20, 30), (255, 255, 255), -1)
+        writer.write(frame)
+    writer.release()
+
+    reference = np.full((10, 10, 3), 255, dtype=np.uint8)
+    ref_path = tmp_path / "reference.png"
+    cv2.imwrite(str(ref_path), reference)
+
+    summary = detect_fuel(video_dir=video_dir, reference_image=ref_path, out_dir=tmp_path / "out", combine=True)
+
+    assert (tmp_path / "out" / "match_combined_map.png").exists()
+    assert str(video_dir / "match_002.mp4") in summary["combine_skipped_videos"]

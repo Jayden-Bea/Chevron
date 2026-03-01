@@ -41,17 +41,9 @@ def _iou(a: tuple[int, int, int, int], b: tuple[int, int, int, int]) -> float:
     return inter / union if union > 0 else 0.0
 
 
-def _nms(
-    detections: list[tuple[int, int, int, int, float]],
-    iou_threshold: float,
-    max_keep: int,
-) -> list[tuple[int, int, int, int, float]]:
-    if not detections:
-        return []
-
+def _nms(detections: list[tuple[int, int, int, int, float]], iou_threshold: float, max_keep: int) -> list[tuple[int, int, int, int, float]]:
     ordered = sorted(detections, key=lambda d: d[4], reverse=True)
     kept: list[tuple[int, int, int, int, float]] = []
-
     for det in ordered:
         box = (det[0], det[1], det[2], det[3])
         if any(_iou(box, (k[0], k[1], k[2], k[3])) > iou_threshold for k in kept):
@@ -59,15 +51,10 @@ def _nms(
         kept.append(det)
         if len(kept) >= max_keep:
             break
-
     return kept
 
 
-def _find_template_matches(
-    gray_frame: np.ndarray,
-    gray_template: np.ndarray,
-    settings: DetectionSettings,
-) -> list[tuple[int, int, int, int, float]]:
+def _find_template_matches(gray_frame: np.ndarray, gray_template: np.ndarray, settings: DetectionSettings) -> list[tuple[int, int, int, int, float]]:
     frame_h, frame_w = gray_frame.shape[:2]
     tpl_h, tpl_w = gray_template.shape[:2]
     scales = np.linspace(settings.scale_min, settings.scale_max, settings.scale_steps)
@@ -79,11 +66,7 @@ def _find_template_matches(
         if scaled_w > frame_w or scaled_h > frame_h:
             continue
 
-        if scaled_w == tpl_w and scaled_h == tpl_h:
-            scaled_template = gray_template
-        else:
-            scaled_template = cv2.resize(gray_template, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
-
+        scaled_template = gray_template if (scaled_w == tpl_w and scaled_h == tpl_h) else cv2.resize(gray_template, (scaled_w, scaled_h), interpolation=cv2.INTER_LINEAR)
         result = cv2.matchTemplate(gray_frame, scaled_template, cv2.TM_CCOEFF_NORMED)
         ys, xs = np.where(result >= float(settings.threshold))
         if ys.size == 0:
@@ -92,18 +75,12 @@ def _find_template_matches(
         scores = result[ys, xs]
         if scores.size > settings.max_candidates_per_scale:
             top_idx = np.argpartition(scores, -settings.max_candidates_per_scale)[-settings.max_candidates_per_scale :]
-            ys = ys[top_idx]
-            xs = xs[top_idx]
-            scores = scores[top_idx]
+            ys, xs, scores = ys[top_idx], xs[top_idx], scores[top_idx]
 
         for x, y, score in zip(xs.tolist(), ys.tolist(), scores.tolist()):
             candidates.append((int(x), int(y), int(scaled_w), int(scaled_h), float(score)))
 
-    return _nms(
-        candidates,
-        iou_threshold=float(settings.nms_iou_threshold),
-        max_keep=int(settings.max_detections_per_frame),
-    )
+    return _nms(candidates, iou_threshold=float(settings.nms_iou_threshold), max_keep=int(settings.max_detections_per_frame))
 
 
 def _render_heatmap(occupancy_map: np.ndarray) -> np.ndarray:
@@ -113,46 +90,39 @@ def _render_heatmap(occupancy_map: np.ndarray) -> np.ndarray:
     return cv2.applyColorMap(normalized.astype(np.uint8), cv2.COLORMAP_JET)
 
 
-def _write_gif(frames: list[np.ndarray], out_path: Path, fps: float) -> None:
-    if not frames:
-        return
-    tmp_mp4 = out_path.with_suffix(".tmp.mp4")
-    h, w = frames[0].shape[:2]
-    writer = cv2.VideoWriter(str(tmp_mp4), cv2.VideoWriter_fourcc(*"mp4v"), max(1.0, float(fps)), (w, h))
-    for frame in frames:
-        writer.write(frame)
-    writer.release()
-
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-i",
-        str(tmp_mp4),
-        "-vf",
-        "fps=10,scale=iw:-1:flags=lanczos",
-        str(out_path),
-    ]
+def _mp4_to_gif(src_mp4: Path, out_gif: Path) -> None:
+    cmd = ["ffmpeg", "-y", "-i", str(src_mp4), "-vf", "fps=10,scale=iw:-1:flags=lanczos", str(out_gif)]
     try:
         subprocess.run(cmd, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
-        raise RuntimeError(f"Failed to write gif {out_path}: {exc.stderr.strip()}") from exc
-    finally:
-        tmp_mp4.unlink(missing_ok=True)
+        raise RuntimeError(f"Failed to write gif {out_gif}: {exc.stderr.strip()}") from exc
 
 
-def detect_fuel(
-    video_dir: str | Path,
-    reference_image: str | Path,
-    out_dir: str | Path,
-    settings: DetectionSettings | None = None,
-    show_preview: bool = False,
-    combine: bool = False,
-) -> dict:
+def _open_tmp_writer(path: Path, fps: float, width: int, height: int) -> cv2.VideoWriter:
+    writer = cv2.VideoWriter(str(path), cv2.VideoWriter_fourcc(*"mp4v"), max(1.0, float(fps)), (width, height))
+    if not writer.isOpened():
+        raise RuntimeError(f"Failed to open temporary writer: {path}")
+    return writer
+
+
+def _write_gif_from_frames(frames: list[np.ndarray], out_gif: Path, fps: float) -> None:
+    if not frames:
+        return
+    tmp_mp4 = out_gif.with_suffix(".tmp.mp4")
+    h, w = frames[0].shape[:2]
+    writer = _open_tmp_writer(tmp_mp4, fps=fps, width=w, height=h)
+    for frame in frames:
+        writer.write(frame)
+    writer.release()
+    _mp4_to_gif(tmp_mp4, out_gif)
+    tmp_mp4.unlink(missing_ok=True)
+
+
+def detect_fuel(video_dir: str | Path, reference_image: str | Path, out_dir: str | Path, settings: DetectionSettings | None = None, show_preview: bool = False, combine: bool = False) -> dict:
     cfg = settings or DetectionSettings()
     src_dir = Path(video_dir)
     if not src_dir.exists() or not src_dir.is_dir():
         raise FileNotFoundError(f"Video directory does not exist: {src_dir}")
-
     ref_path = Path(reference_image)
     if not ref_path.exists():
         raise FileNotFoundError(f"Reference image not found: {ref_path}")
@@ -168,9 +138,11 @@ def detect_fuel(
     reference_gray = cv2.cvtColor(reference, cv2.COLOR_BGR2GRAY)
 
     per_match: list[dict] = []
-    combined_occ = None
+    combined_occ: np.ndarray | None = None
     combined_frames_sum: list[np.ndarray] = []
     combined_frames_count: list[int] = []
+    combine_shape: tuple[int, int] | None = None
+    combine_skipped_videos: list[str] = []
     all_counts: list[dict] = []
     total_frames = 0
     total_hits = 0
@@ -185,15 +157,16 @@ def detect_fuel(
         h, w = probe.shape[:2]
         cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
 
-        occupancy = np.zeros((h, w), dtype=np.float32)
-        timeline_frames: list[np.ndarray] = []
-        counts: list[int] = []
-        match_hits = 0
-        frame_idx = 0
-
         stem = video_path.stem
         map_png = out / f"{stem}_map.png"
         map_gif = out / f"{stem}_map.gif"
+        tmp_timeline_mp4 = out / f"{stem}_timeline.tmp.mp4"
+
+        occupancy = np.zeros((h, w), dtype=np.float32)
+        timeline_writer = _open_tmp_writer(tmp_timeline_mp4, fps=fps, width=w, height=h)
+        counts: list[int] = []
+        match_hits = 0
+        frame_idx = 0
 
         while True:
             ok, frame = cap.read()
@@ -215,9 +188,8 @@ def detect_fuel(
             counts.append(count)
             all_counts.append({"video": str(video_path), "frame_idx": frame_idx, "fuel_count": count})
             match_hits += count
-
             cv2.putText(timeline, f"fuel_count={count}", (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2, cv2.LINE_AA)
-            timeline_frames.append(timeline)
+            timeline_writer.write(timeline)
 
             if show_preview:
                 cv2.putText(frame, f"fuel_count={count}", (12, 26), cv2.FONT_HERSHEY_SIMPLEX, 0.75, (0, 255, 255), 2, cv2.LINE_AA)
@@ -229,34 +201,48 @@ def detect_fuel(
             frame_idx += 1
 
         cap.release()
+        timeline_writer.release()
         if show_preview:
             cv2.destroyAllWindows()
 
-        heat = _render_heatmap(occupancy)
-        cv2.imwrite(str(map_png), heat)
-        _write_gif(timeline_frames, map_gif, fps=fps)
+        cv2.imwrite(str(map_png), _render_heatmap(occupancy))
+        _mp4_to_gif(tmp_timeline_mp4, map_gif)
 
-        if combined_occ is None:
-            combined_occ = np.zeros_like(occupancy)
-        combined_occ += occupancy
-
-        for i, fr in enumerate(timeline_frames):
-            if i >= len(combined_frames_sum):
-                combined_frames_sum.append(fr.astype(np.float32))
-                combined_frames_count.append(1)
+        if combine:
+            if combine_shape is None:
+                combine_shape = (h, w)
+                combined_occ = np.zeros_like(occupancy)
+            if combine_shape == (h, w) and combined_occ is not None:
+                combined_occ += occupancy
+                timeline_cap = cv2.VideoCapture(str(tmp_timeline_mp4))
+                frame_i = 0
+                while timeline_cap.isOpened():
+                    ok_t, fr = timeline_cap.read()
+                    if not ok_t:
+                        break
+                    fr32 = fr.astype(np.float32)
+                    if frame_i >= len(combined_frames_sum):
+                        combined_frames_sum.append(fr32)
+                        combined_frames_count.append(1)
+                    else:
+                        combined_frames_sum[frame_i] += fr32
+                        combined_frames_count[frame_i] += 1
+                    frame_i += 1
+                timeline_cap.release()
             else:
-                combined_frames_sum[i] += fr.astype(np.float32)
-                combined_frames_count[i] += 1
+                combine_skipped_videos.append(str(video_path))
 
-        total_frames += len(timeline_frames)
+        tmp_timeline_mp4.unlink(missing_ok=True)
+
+        total_frames += frame_idx
         total_hits += match_hits
         per_match.append(
             {
                 "input": str(video_path),
                 "outputs": {"map_png": str(map_png), "map_gif": str(map_gif)},
-                "frames": len(timeline_frames),
+                "frames": frame_idx,
                 "detections": match_hits,
-                "detections_per_frame_avg": (match_hits / len(timeline_frames)) if timeline_frames else 0.0,
+                "detections_per_frame_avg": (match_hits / frame_idx) if frame_idx else 0.0,
                 "detections_per_frame_max": max(counts) if counts else 0,
             }
         )
@@ -266,13 +252,12 @@ def detect_fuel(
         combined_png = out / "match_combined_map.png"
         combined_gif = out / "match_combined_map.gif"
 
-        avg_occ = combined_occ / max(1, len(per_match))
+        included_for_combine = max(1, len(per_match) - len(combine_skipped_videos))
+        avg_occ = combined_occ / float(included_for_combine)
         cv2.imwrite(str(combined_png), _render_heatmap(avg_occ))
 
-        avg_frames: list[np.ndarray] = []
-        for s, c in zip(combined_frames_sum, combined_frames_count):
-            avg_frames.append(np.clip(s / max(1, c), 0, 255).astype(np.uint8))
-        _write_gif(avg_frames, combined_gif, fps=10.0)
+        avg_frames = [np.clip(s / max(1, c), 0, 255).astype(np.uint8) for s, c in zip(combined_frames_sum, combined_frames_count)]
+        _write_gif_from_frames(avg_frames, combined_gif, fps=10.0)
         combined_outputs = {"map_png": str(combined_png), "map_gif": str(combined_gif)}
 
     counts_path = out / "tracked_counts.json"
@@ -283,6 +268,7 @@ def detect_fuel(
         "reference_image": str(ref_path),
         "per_match": per_match,
         "combined_outputs": combined_outputs,
+        "combine_skipped_videos": combine_skipped_videos,
         "outputs": {"counts_json": str(counts_path)},
         "settings": {
             "threshold": cfg.threshold,
