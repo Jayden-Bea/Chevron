@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import re
 import shutil
 import subprocess
@@ -15,6 +16,7 @@ from .utils.io import ensure_dir, write_json
 _RED = "\x1b[31m"
 _GREEN = "\x1b[32m"
 _RESET = "\x1b[0m"
+_DEFAULT_YOUTUBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
 
 def _colored(text: str, color: str) -> str:
@@ -49,20 +51,30 @@ def _resolve_youtube_title(url: str) -> str:
     return lines[-1] if lines else url
 
 
+
+
+def _with_user_agent(name: str, args: list[str]) -> dict[str, str | list[str]]:
+    return {"name": name, "args": [*args, "--user-agent", _DEFAULT_YOUTUBE_USER_AGENT]}
+
+
 def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
     # Ordered from least invasive to most aggressive compatibility workarounds.
     strategies: list[dict[str, str | list[str]]] = [
         {"name": "default", "args": []},
+        _with_user_agent("default_modern_ua", []),
         {"name": "android", "args": ["--extractor-args", "youtube:player_client=android"]},
+        _with_user_agent("android_modern_ua", ["--extractor-args", "youtube:player_client=android"]),
         {"name": "android_creator", "args": ["--extractor-args", "youtube:player_client=android_creator"]},
         {"name": "android_music", "args": ["--extractor-args", "youtube:player_client=android_music"]},
         {"name": "android_vr", "args": ["--extractor-args", "youtube:player_client=android_vr"]},
         {"name": "web", "args": ["--extractor-args", "youtube:player_client=web"]},
+        _with_user_agent("web_modern_ua", ["--extractor-args", "youtube:player_client=web"]),
         {"name": "web_creator", "args": ["--extractor-args", "youtube:player_client=web_creator"]},
         {"name": "web_embedded", "args": ["--extractor-args", "youtube:player_client=web_embedded"]},
         {"name": "web_music", "args": ["--extractor-args", "youtube:player_client=web_music"]},
         {"name": "mweb", "args": ["--extractor-args", "youtube:player_client=mweb"]},
         {"name": "ios", "args": ["--extractor-args", "youtube:player_client=ios"]},
+        _with_user_agent("ios_modern_ua", ["--extractor-args", "youtube:player_client=ios"]),
         {"name": "tv", "args": ["--extractor-args", "youtube:player_client=tv"]},
         {"name": "tv_embedded", "args": ["--extractor-args", "youtube:player_client=tv_embedded"]},
     ]
@@ -117,6 +129,25 @@ def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
         )
 
     return strategies
+
+
+
+
+def _shuffle_youtube_strategies(url: str, strategies: list[dict[str, str | list[str]]]) -> list[dict[str, str | list[str]]]:
+    if len(strategies) <= 1:
+        return list(strategies)
+
+    # Keep the plain default first, but shuffle the remaining fallback strategies per-URL.
+    # This avoids a single static fingerprint while remaining deterministic for a given URL.
+    first = strategies[0]
+    remaining = strategies[1:]
+
+    def _sort_key(strategy: dict[str, str | list[str]]) -> str:
+        name = str(strategy.get("name", ""))
+        payload = f"{url}|{name}".encode("utf-8")
+        return hashlib.sha256(payload).hexdigest()
+
+    return [first, *sorted(remaining, key=_sort_key)]
 
 
 def _should_offer_manual_auth_fallback(attempts: list[dict[str, str | int]]) -> bool:
@@ -187,7 +218,7 @@ def _download_youtube(
     cache_dir.mkdir(parents=True, exist_ok=True)
     output_tmpl = str(cache_dir / "%(id)s.%(ext)s")
 
-    strategies = _youtube_download_strategies()
+    strategies = _shuffle_youtube_strategies(url, _youtube_download_strategies())
     if youtube_cookies_from_browser:
         browser_spec = str(youtube_cookies_from_browser).strip()
         if browser_spec:
@@ -314,7 +345,12 @@ def _download_youtube(
     last_error = attempts[-1].get("error", "unknown yt-dlp failure") if attempts else "unknown yt-dlp failure"
     raise RuntimeError(
         "yt-dlp could not download the URL after exhausting all configured YouTube connection strategies. "
-        f"Last error: {last_error}"
+        f"Last error: {last_error}\n\n"
+        "Troubleshooting tips:\n"
+        "- Update yt-dlp: `pip install -U yt-dlp`\n"
+        "- Try probing formats: `yt-dlp -F <url>`\n"
+        "- Retry with authenticated access (`--youtube-cookies-file` or `--youtube-cookies-from-browser`)\n"
+        "- Chevron already shuffles YouTube client/user-agent strategies automatically; if all fail, retry later or use a local video file"
     )
 
 
