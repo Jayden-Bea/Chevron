@@ -12,6 +12,7 @@ dependencies = [
   "numpy>=1.24",
   "opencv-python>=4.8",
   "PyYAML>=6.0",
+  "yt-dlp",
 ]
 
 [project.optional-dependencies]

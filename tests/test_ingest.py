@@ -5,11 +5,40 @@ import pytest
 
 from chevron.ingest import (
     _download_youtube,
+    _ensure_yt_dlp_minimum_version,
     _is_retryable_ytdlp_error,
     _normalize_youtube_cookie_header,
+    _parse_yt_dlp_version,
     _shuffle_youtube_strategies,
     _youtube_download_strategies,
 )
+
+
+@pytest.fixture(autouse=True)
+def mock_minimum_ytdlp_version(monkeypatch):
+    monkeypatch.setattr(
+        "chevron.ingest._ensure_yt_dlp_minimum_version",
+        lambda minimum_version="2026.02.28": ("2026.02.28", (2026, 2, 28)),
+    )
+
+
+def test_parse_yt_dlp_version_handles_stable_and_none():
+    assert _parse_yt_dlp_version("2026.02.28") == (2026, 2, 28)
+    assert _parse_yt_dlp_version("stable@2026.03.01 from yt-dlp/yt-dlp") == (2026, 3, 1)
+    assert _parse_yt_dlp_version("nightly") is None
+
+
+def test_ensure_yt_dlp_minimum_version_rejects_older_build(monkeypatch):
+    monkeypatch.undo()
+
+    class Completed:
+        stdout = "2025.12.31\n"
+
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: Completed())
+
+    with pytest.raises(RuntimeError, match="require >= 2026.02.28"):
+        _ensure_yt_dlp_minimum_version("2026.02.28")
+
 
 
 def test_is_retryable_ytdlp_error_matches_expected_messages():
@@ -51,8 +80,9 @@ def test_download_youtube_retries_across_clients(monkeypatch, tmp_path: Path):
     assert download_result.attempts[0]["strategy"] == "default"
     assert download_result.successful_strategy == download_result.attempts[-1]["strategy"]
     assert download_result.attempts[-1]["status"] == "success"
-    assert "Attempting to ingest youtube video Sample title with the following settings:\n[]" in logs[0]
-    assert "Ingest \x1b[31mfailed\x1b[0m." in logs[1]
+    assert "Using yt-dlp version 2026.02.28" in logs[0]
+    assert "Attempting YouTube ingest strategy=default video='Sample title' args=[]" in logs[1]
+    assert "Ingest \x1b[31mfailed\x1b[0m strategy=default returncode=1." in logs[2]
     assert "Ingest \x1b[32msucceeded\x1b[0m." in logs[-2]
     assert "Saving device settings as:" in logs[-1]
 
