@@ -32,7 +32,7 @@ def _stub_cv2_gui(monkeypatch, keys):
     monkeypatch.setattr("cv2.waitKey", lambda *_args, **_kwargs: next(key_iter, ord("n")))
 
 
-def test_run_local_verify_uses_saved_correspondences_and_skips_calibrated_views(monkeypatch, tmp_path, capsys):
+def test_run_local_verify_includes_precalibrated_views_in_sequential_order(monkeypatch, tmp_path, capsys):
     frame = np.zeros((90, 120, 3), dtype=np.uint8)
     out_json = tmp_path / "verify_correspondences.json"
     out_json.write_text(
@@ -62,12 +62,13 @@ def test_run_local_verify_uses_saved_correspondences_and_skips_calibrated_views(
             "bottom_right": [60, 30, 60, 60],
         },
     )
-    _stub_cv2_gui(monkeypatch, [ord("q"), ord("q")])
+    _stub_cv2_gui(monkeypatch, [ord("q"), ord("q"), ord("q")])
 
     result = run_local_verify("video.mp4", "config.yml", out_json, frame_idx=7)
 
     stdout = capsys.readouterr().out
-    assert "sequential verify order -> bottom_right, bottom_left" in stdout
+    assert "sequential verify order -> top, bottom_right, bottom_left" in stdout
+    assert "calibrating view -> top" in stdout
     assert len(result["top"]["image_points"]) == 4
 
 

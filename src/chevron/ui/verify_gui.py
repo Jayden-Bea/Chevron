@@ -112,19 +112,10 @@ def run_local_verify(video: str, config: str, out_json: str | Path, frame_idx: i
     print("[chevron] verify(local): click IMAGE point in crop window, then matching FIELD point in field window.")
     print("[chevron] verify(local): keys -> n/space(next view), u(undo pair), c(clear view), q(save+next), esc(cancel)")
 
-    views_to_verify = [
-        view
-        for view in VIEW_ORDER
-        if view in layout
-        and min(
-            len(correspondences.get(view, {}).get("image_points", [])),
-            len(correspondences.get(view, {}).get("field_points", [])),
-        )
-        < 4
-    ]
+    views_to_verify = [view for view in VIEW_ORDER if view in layout]
     if not views_to_verify:
         _save_correspondences(video, config, out_path, frame_idx, correspondences)
-        print("[chevron] verify(local): all views already calibrated; loaded saved correspondences.")
+        print("[chevron] verify(local): no configured views found in layout.")
         return correspondences
     print(f"[chevron] verify(local): sequential verify order -> {', '.join(views_to_verify)}")
 
