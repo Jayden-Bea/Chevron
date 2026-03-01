@@ -193,7 +193,7 @@ def test_cmd_ingest_runs_capture_area_selector_when_enabled(monkeypatch, tmp_pat
 
     captured = {}
 
-    def fake_ingest(url, video, out_dir, fps):
+    def fake_ingest(url, video, out_dir, fps, logger=None):
         proxy = tmp_path / "proxy.mp4"
         proxy.write_bytes(b"fake")
         return {"proxy": str(proxy)}
@@ -279,7 +279,7 @@ def test_cmd_run_uses_full_proxy_for_raw_export_and_cropped_video_for_pipeline(m
 
     calls = {}
 
-    def fake_ingest(url, video, out_dir, fps):
+    def fake_ingest(url, video, out_dir, fps, logger=None):
         return {"proxy": str(proxy)}
 
     def fake_detect_segments(video, cfg, out, debug_dir, progress_interval_s, progress_callback):

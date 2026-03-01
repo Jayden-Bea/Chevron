@@ -199,7 +199,7 @@ def cmd_ingest(args):
     from .ingest import ingest
 
     _log("[chevron] ingest: starting")
-    meta = ingest(url=args.url, video=args.video, out_dir=args.out, fps=args.fps)
+    meta = ingest(url=args.url, video=args.video, out_dir=args.out, fps=args.fps, logger=_log)
 
     if args.select_capture_area:
         from .ui.capture_area_selector import select_capture_area
@@ -388,7 +388,7 @@ def cmd_run(args):
     ingest_meta = _load_existing_ingest_meta(workdir) if args.resume else None
     if ingest_meta is None:
         _log("[chevron] run: ingest stage")
-        ingest_meta = ingest(url=args.url, video=args.video, out_dir=workdir, fps=output_fps)
+        ingest_meta = ingest(url=args.url, video=args.video, out_dir=workdir, fps=output_fps, logger=_log)
         _write_run_status(run_status_path, "ingest_complete", {"proxy": ingest_meta.get("proxy")})
     else:
         _log("[chevron] run: reusing previous ingest output")

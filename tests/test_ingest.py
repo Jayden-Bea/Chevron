@@ -12,11 +12,13 @@ def test_is_retryable_ytdlp_error_matches_expected_messages():
     assert _is_retryable_ytdlp_error("youtube client outdated")
     assert _is_retryable_ytdlp_error("HTTP Error 429: Too Many Requests")
     assert _is_retryable_ytdlp_error("Sign in to confirm you're not a bot")
+    assert _is_retryable_ytdlp_error("Sign in to confirm you’re not a bot")
     assert not _is_retryable_ytdlp_error("network timeout")
 
 
 def test_download_youtube_retries_across_clients(monkeypatch, tmp_path: Path):
     calls: list[list[str]] = []
+    logs: list[str] = []
 
     def fake_run(cmd, check, text, capture_output):
         calls.append(cmd)
@@ -32,18 +34,24 @@ def test_download_youtube_retries_across_clients(monkeypatch, tmp_path: Path):
         out_file.write_bytes(b"video")
         return None
 
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
     monkeypatch.setattr("subprocess.run", fake_run)
 
-    download_result = _download_youtube("https://youtube.com/watch?v=abc123", tmp_path)
+    download_result = _download_youtube("https://youtube.com/watch?v=abc123", tmp_path, logger=logs.append)
 
     assert download_result.source_path.name == "abc123.mp4"
     assert download_result.successful_strategy == "android_creator"
+    assert download_result.successful_strategy_args == ["--extractor-args", "youtube:player_client=android_creator"]
     assert len(calls) == 3
     assert "--extractor-args" not in calls[0]
     assert any("youtube:player_client=android" in part for part in calls[1])
     assert any("youtube:player_client=android_creator" in part for part in calls[2])
     assert download_result.attempts[0]["strategy"] == "default"
     assert download_result.attempts[-1]["status"] == "success"
+    assert "Attempting to ingest youtube video Sample title with the following settings:\n[]" in logs[0]
+    assert "Ingest \x1b[31mfailed\x1b[0m." in logs[1]
+    assert "Ingest \x1b[32msucceeded\x1b[0m." in logs[-2]
+    assert "Saving device settings as: ['--extractor-args', 'youtube:player_client=android_creator']" in logs[-1]
 
 
 def test_download_youtube_raises_on_non_retryable_error(monkeypatch, tmp_path: Path):
@@ -55,6 +63,7 @@ def test_download_youtube_raises_on_non_retryable_error(monkeypatch, tmp_path: P
             stderr="ERROR: unavailable",
         )
 
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
     monkeypatch.setattr("subprocess.run", fake_run)
 
     with pytest.raises(RuntimeError, match="exhausting all configured YouTube connection strategies"):
@@ -73,6 +82,7 @@ def test_download_youtube_raises_runtime_error_after_exhausting_retryable_client
             stderr="ERROR: YouTube client outdated",
         )
 
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
     monkeypatch.setattr("subprocess.run", fake_run)
 
     with pytest.raises(RuntimeError, match="Last error"):
@@ -97,6 +107,7 @@ def test_download_youtube_raises_runtime_error_when_ytdlp_missing(monkeypatch, t
     def fake_run(cmd, check, text, capture_output):
         raise FileNotFoundError("yt-dlp")
 
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
     monkeypatch.setattr("subprocess.run", fake_run)
 
     with pytest.raises(RuntimeError, match="yt-dlp is required"):

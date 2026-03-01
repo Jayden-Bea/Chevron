@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,20 +10,41 @@ from .utils.ffmpeg import normalize_video
 from .utils.io import ensure_dir, write_json
 
 
+_RED = "\x1b[31m"
+_GREEN = "\x1b[32m"
+_RESET = "\x1b[0m"
+
+
+def _colored(text: str, color: str) -> str:
+    return f"{color}{text}{_RESET}"
+
+
 @dataclass
 class YouTubeDownloadResult:
     source_path: Path
     successful_strategy: str
+    successful_strategy_args: list[str]
     attempts: list[dict[str, str | int]]
 
 
 def _is_retryable_ytdlp_error(message: str) -> bool:
-    lowered = message.lower()
+    lowered = message.lower().replace("’", "'")
     is_403 = "403" in lowered and "forbidden" in lowered
     is_429 = "429" in lowered and "too many requests" in lowered
     is_outdated_client = "youtube client outdated" in lowered
     is_bot_challenge = "sign in to confirm" in lowered and "not a bot" in lowered
     return is_403 or is_429 or is_outdated_client or is_bot_challenge
+
+
+def _resolve_youtube_title(url: str) -> str:
+    cmd = ["yt-dlp", "--skip-download", "--print", "%(title)s", url]
+    try:
+        completed = subprocess.run(cmd, check=True, text=True, capture_output=True)
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return url
+
+    lines = [line.strip() for line in (completed.stdout or "").splitlines() if line.strip()]
+    return lines[-1] if lines else url
 
 
 def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
@@ -56,25 +78,40 @@ def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
     ]
 
 
-def _download_youtube(url: str, cache_dir: Path) -> YouTubeDownloadResult:
+def _download_youtube(
+    url: str,
+    cache_dir: Path,
+    logger: Callable[[str], None] | None = None,
+) -> YouTubeDownloadResult:
     cache_dir.mkdir(parents=True, exist_ok=True)
     output_tmpl = str(cache_dir / "%(id)s.%(ext)s")
 
     strategies = _youtube_download_strategies()
     attempts: list[dict[str, str | int]] = []
+    video_title = _resolve_youtube_title(url)
 
     for strategy in strategies:
         cmd = ["yt-dlp", "-o", output_tmpl]
         cmd.extend(strategy["args"])
         cmd.append(url)
 
+        if logger:
+            logger(
+                "Attempting to ingest youtube video "
+                f"{video_title} with the following settings:\n{strategy['args'] or '[]'}"
+            )
+
         try:
             subprocess.run(cmd, check=True, text=True, capture_output=True)
             latest = max(cache_dir.glob("*"), key=lambda p: p.stat().st_mtime)
             attempts.append({"strategy": strategy["name"], "status": "success", "returncode": 0})
+            if logger:
+                logger(f"Ingest {_colored('succeeded', _GREEN)}.")
+                logger(f"Saving device settings as: {strategy['args'] or '[]'}")
             return YouTubeDownloadResult(
                 source_path=latest,
                 successful_strategy=strategy["name"],
+                successful_strategy_args=list(strategy["args"]),
                 attempts=attempts,
             )
         except FileNotFoundError as err:
@@ -92,6 +129,9 @@ def _download_youtube(url: str, cache_dir: Path) -> YouTubeDownloadResult:
                     "error": message.strip() or "unknown yt-dlp failure",
                 }
             )
+            if logger:
+                logger(f"Ingest {_colored('failed', _RED)}.")
+            continue
 
     last_error = attempts[-1].get("error", "unknown yt-dlp failure") if attempts else "unknown yt-dlp failure"
     raise RuntimeError(
@@ -100,13 +140,19 @@ def _download_youtube(url: str, cache_dir: Path) -> YouTubeDownloadResult:
     )
 
 
-def ingest(url: str | None, video: str | None, out_dir: str | Path, fps: int = 30) -> dict:
+def ingest(
+    url: str | None,
+    video: str | None,
+    out_dir: str | Path,
+    fps: int = 30,
+    logger: Callable[[str], None] | None = None,
+) -> dict:
     out = ensure_dir(out_dir)
     source_dir = ensure_dir(out / "source")
     proxy_path = out / "proxy.mp4"
 
     if url:
-        download_result = _download_youtube(url, source_dir)
+        download_result = _download_youtube(url, source_dir, logger=logger)
         src = download_result.source_path
     elif video:
         src = Path(video)
@@ -128,6 +174,7 @@ def ingest(url: str | None, video: str | None, out_dir: str | Path, fps: int = 3
     if download_result:
         meta["youtube_download"] = {
             "successful_strategy": download_result.successful_strategy,
+            "successful_strategy_args": download_result.successful_strategy_args,
             "attempts": download_result.attempts,
         }
     write_json(out / "ingest_meta.json", meta)
