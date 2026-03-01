@@ -9,6 +9,7 @@ from chevron.ingest import (
     _is_retryable_ytdlp_error,
     _normalize_youtube_cookie_header,
     _parse_yt_dlp_version,
+    _YTDLP_PREFERRED_FORMAT_ARGS,
     _shuffle_youtube_strategies,
     _youtube_download_strategies,
 )
@@ -77,6 +78,7 @@ def test_download_youtube_retries_across_clients(monkeypatch, tmp_path: Path):
     assert download_result.source_path.name == "abc123.mp4"
     assert len(calls) == 3
     assert "--extractor-args" not in calls[0]
+    assert calls[0][3:3 + len(_YTDLP_PREFERRED_FORMAT_ARGS)] == _YTDLP_PREFERRED_FORMAT_ARGS
     assert download_result.attempts[0]["strategy"] == "default"
     assert download_result.successful_strategy == download_result.attempts[-1]["strategy"]
     assert download_result.attempts[-1]["status"] == "success"
@@ -232,6 +234,7 @@ def test_download_youtube_uses_provided_cookie_header_first(monkeypatch, tmp_pat
 
     assert result.successful_strategy == "manual_cookie_header"
     assert result.attempts[0]["strategy"] == "manual_cookie_header"
+    assert calls[0][3:3 + len(_YTDLP_PREFERRED_FORMAT_ARGS)] == _YTDLP_PREFERRED_FORMAT_ARGS
     assert "--add-header" in calls[0]
 
 
