@@ -4,6 +4,7 @@ import subprocess
 import pytest
 
 from chevron.ingest import (
+    YouTubeDownloadResult,
     _download_youtube,
     _ensure_yt_dlp_minimum_version,
     _is_retryable_ytdlp_error,
@@ -12,6 +13,7 @@ from chevron.ingest import (
     _YTDLP_PREFERRED_FORMAT_ARGS,
     _shuffle_youtube_strategies,
     _youtube_download_strategies,
+    ingest,
 )
 
 
@@ -406,3 +408,92 @@ def test_download_youtube_accepts_browser_profile_spec(monkeypatch, tmp_path: Pa
 
     assert result.successful_strategy == "user_browser_cookies_chrome"
     assert "chrome:Default" in calls[0]
+
+
+def test_download_youtube_uses_explicit_output_path(monkeypatch, tmp_path: Path):
+    output_path = tmp_path / "proxy.mp4"
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, check, text, capture_output):
+        calls.append(cmd)
+        output_path.write_bytes(b"video")
+        return None
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = _download_youtube(
+        "https://youtube.com/watch?v=abc123",
+        tmp_path,
+        output_path=output_path,
+    )
+
+    assert calls[0][2] == str(output_path)
+    assert result.source_path == output_path
+
+
+def test_ingest_url_uses_downloaded_mp4_as_proxy_without_normalization(monkeypatch, tmp_path: Path):
+    out_dir = tmp_path / "workdir"
+    proxy_path = out_dir / "proxy.mp4"
+
+    monkeypatch.setattr(
+        "chevron.ingest._download_youtube",
+        lambda *args, **kwargs: YouTubeDownloadResult(
+            source_path=proxy_path,
+            successful_strategy="default",
+            successful_strategy_args=[],
+            attempts=[{"strategy": "default", "status": "success", "returncode": 0}],
+        ),
+    )
+
+    def fail_normalize(*args, **kwargs):
+        raise AssertionError("normalize_video should not run for URL ingest")
+
+    monkeypatch.setattr("chevron.ingest.normalize_video", fail_normalize)
+
+    meta = ingest(url="https://youtube.com/watch?v=abc123", video=None, out_dir=out_dir, fps=10)
+
+    assert meta["source"].endswith("proxy.mp4")
+    assert meta["proxy"].endswith("proxy.mp4")
+
+
+def test_ingest_local_mp4_copies_to_proxy_without_normalization(monkeypatch, tmp_path: Path):
+    source = tmp_path / "input.mp4"
+    source.write_bytes(b"source")
+    out_dir = tmp_path / "workdir"
+
+    def fail_normalize(*args, **kwargs):
+        raise AssertionError("normalize_video should not run for local MP4 ingest")
+
+    monkeypatch.setattr("chevron.ingest.normalize_video", fail_normalize)
+
+    meta = ingest(url=None, video=str(source), out_dir=out_dir, fps=12)
+
+    proxy = Path(meta["proxy"])
+    assert proxy.exists()
+    assert proxy.read_bytes() == b"source"
+    assert meta["source"].endswith("source/input.mp4")
+    assert meta["proxy"].endswith("proxy.mp4")
+
+
+def test_ingest_local_non_mp4_still_normalizes_to_proxy(monkeypatch, tmp_path: Path):
+    source = tmp_path / "input.mkv"
+    source.write_bytes(b"source")
+    out_dir = tmp_path / "workdir"
+
+    called = {}
+
+    def fake_normalize(in_path, out_path, fps):
+        called["in_path"] = Path(in_path)
+        called["out_path"] = Path(out_path)
+        called["fps"] = fps
+
+    monkeypatch.setattr("chevron.ingest.normalize_video", fake_normalize)
+
+    meta = ingest(url=None, video=str(source), out_dir=out_dir, fps=12)
+
+    assert called["in_path"].name == "input.mkv"
+    assert called["out_path"].name == "proxy.mp4"
+    assert called["fps"] == 12
+    assert meta["source"].endswith("source/input.mkv")
+    assert meta["proxy"].endswith("proxy.mp4")
