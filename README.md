@@ -68,9 +68,18 @@ chevron ingest --url "https://youtube.com/watch?v=..." --out workdir/ --youtube-
 chevron run --url "https://youtube.com/watch?v=..." --config configs/example_config.yml --out out_dir/ --youtube-cookies-from-browser chrome
 ```
 
-You can usually swap `chrome` for `edge` or `firefox` if needed. This is the lowest-effort option and avoids DevTools header hunting.
+You can usually swap `chrome` for `edge` or `firefox` if needed. You can also target a specific browser profile (example: `--youtube-cookies-from-browser "chrome:Default"`).
 
-If YouTube blocks anonymous download attempts (403 / "sign in to confirm you're not a bot"), Chevron supports a user-provided Cookie header fallback that is now available directly from the CLI via `--youtube-cookie` (or env var `CHEVRON_YOUTUBE_COOKIE`).
+**Most robust option for stubborn auth failures:** export cookies once to Netscape `cookies.txt` and pass `--youtube-cookies-file` (or env var `CHEVRON_YOUTUBE_COOKIES_FILE`). This avoids browser keychain/cookie DB edge cases in CI and remote environments.
+
+```bash
+chevron ingest --url "https://youtube.com/watch?v=..." --out workdir/ --youtube-cookies-file /path/to/cookies.txt
+# or
+export CHEVRON_YOUTUBE_COOKIES_FILE=/path/to/cookies.txt
+chevron run --url "https://youtube.com/watch?v=..." --config configs/example_config.yml --out out_dir/
+```
+
+If YouTube blocks anonymous download attempts (403 / "sign in to confirm you're not a bot"), Chevron also supports a user-provided Cookie header fallback directly via `--youtube-cookie` (or env var `CHEVRON_YOUTUBE_COOKIE`).
 
 1. Sign in to YouTube in your browser.
 2. Open browser DevTools → **Network** tab and reload `youtube.com`.
@@ -94,6 +103,7 @@ chevron ingest --url "https://youtube.com/watch?v=..." --out workdir/
 
 Notes:
 - `--youtube-cookies-from-browser` / `CHEVRON_YOUTUBE_BROWSER` is the simplest path for most users.
+- `--youtube-cookies-file` / `CHEVRON_YOUTUBE_COOKIES_FILE` is the most reliable path when browser-cookie extraction is flaky.
 - The cookie is only used for YouTube ingest authentication fallback.
 - If a provided cookie fails, Chevron automatically retries built-in yt-dlp strategies.
 - Avoid sharing or committing cookie values; treat them as sensitive credentials.
