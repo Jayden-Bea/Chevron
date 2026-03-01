@@ -3,7 +3,12 @@ import subprocess
 
 import pytest
 
-from chevron.ingest import _download_youtube, _is_retryable_ytdlp_error, _youtube_download_strategies
+from chevron.ingest import (
+    _download_youtube,
+    _is_retryable_ytdlp_error,
+    _normalize_youtube_cookie_header,
+    _youtube_download_strategies,
+)
 
 
 def test_is_retryable_ytdlp_error_matches_expected_messages():
@@ -181,3 +186,135 @@ def test_download_youtube_does_not_prompt_manual_cookie_before_exhaustion(monkey
 
     assert result.successful_strategy == "android"
     assert prompted["value"] is False
+
+
+def test_download_youtube_uses_provided_cookie_header_first(monkeypatch, tmp_path: Path):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, check, text, capture_output):
+        calls.append(cmd)
+        out_file = tmp_path / "cookie_first.mp4"
+        out_file.write_bytes(b"video")
+        return None
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = _download_youtube(
+        "https://youtube.com/watch?v=abc123",
+        tmp_path,
+        youtube_cookie_header="SID=fake",
+    )
+
+    assert result.successful_strategy == "manual_cookie_header"
+    assert result.attempts[0]["strategy"] == "manual_cookie_header"
+    assert "--add-header" in calls[0]
+
+
+def test_download_youtube_falls_back_to_automatic_strategies_when_provided_cookie_fails(monkeypatch, tmp_path: Path):
+    calls = {"count": 0}
+
+    def fake_run(cmd, check, text, capture_output):
+        calls["count"] += 1
+        if "--add-header" in cmd:
+            raise subprocess.CalledProcessError(returncode=1, cmd=cmd, output="", stderr="cookie failed")
+        if calls["count"] == 2:
+            raise subprocess.CalledProcessError(returncode=1, cmd=cmd, output="", stderr="403 Forbidden")
+
+        out_file = tmp_path / "auto_after_cookie.mp4"
+        out_file.write_bytes(b"video")
+        return None
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = _download_youtube(
+        "https://youtube.com/watch?v=abc123",
+        tmp_path,
+        youtube_cookie_header="SID=fake",
+    )
+
+    assert result.successful_strategy == "android"
+    assert result.attempts[0]["strategy"] == "manual_cookie_header"
+    assert result.attempts[0]["status"] == "failed"
+
+
+def test_normalize_youtube_cookie_header_accepts_plain_cookie_value():
+    normalized = _normalize_youtube_cookie_header("SID=abc; HSID=def")
+
+    assert normalized == "SID=abc; HSID=def"
+
+
+def test_normalize_youtube_cookie_header_accepts_cookie_prefix():
+    normalized = _normalize_youtube_cookie_header("Cookie: SID=abc; HSID=def")
+
+    assert normalized == "SID=abc; HSID=def"
+
+
+def test_normalize_youtube_cookie_header_extracts_cookie_line_from_header_block():
+    normalized = _normalize_youtube_cookie_header(
+        "Accept: text/html\nUser-Agent: test\nCookie: SID=abc; HSID=def\nReferer: https://youtube.com"
+    )
+
+    assert normalized == "SID=abc; HSID=def"
+
+
+def test_normalize_youtube_cookie_header_rejects_header_blob_without_cookie():
+    normalized = _normalize_youtube_cookie_header("Accept: text/html\nUser-Agent: test")
+
+    assert normalized is None
+
+
+def test_download_youtube_prefers_user_browser_cookies_strategy(monkeypatch, tmp_path: Path):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, check, text, capture_output):
+        calls.append(cmd)
+        out_file = tmp_path / "browser_cookie.mp4"
+        out_file.write_bytes(b"video")
+        return None
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = _download_youtube(
+        "https://youtube.com/watch?v=abc123",
+        tmp_path,
+        youtube_cookies_from_browser="chrome",
+    )
+
+    assert result.successful_strategy == "user_browser_cookies_chrome"
+    assert result.successful_strategy_args == [
+        "--extractor-args",
+        "youtube:player_client=web",
+        "--cookies-from-browser",
+        "chrome",
+    ]
+    assert "--cookies-from-browser" in calls[0]
+
+
+def test_download_youtube_falls_back_after_user_browser_cookies_failure(monkeypatch, tmp_path: Path):
+    calls = {"count": 0}
+
+    def fake_run(cmd, check, text, capture_output):
+        calls["count"] += 1
+        if "--cookies-from-browser" in cmd:
+            raise subprocess.CalledProcessError(returncode=1, cmd=cmd, output="", stderr="browser cookie error")
+        if calls["count"] == 2:
+            out_file = tmp_path / "fallback.mp4"
+            out_file.write_bytes(b"video")
+            return None
+        raise subprocess.CalledProcessError(returncode=1, cmd=cmd, output="", stderr="403 Forbidden")
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    result = _download_youtube(
+        "https://youtube.com/watch?v=abc123",
+        tmp_path,
+        youtube_cookies_from_browser="edge",
+    )
+
+    assert result.successful_strategy == "default"
+    assert result.attempts[0]["strategy"] == "user_browser_cookies_edge"
+    assert result.attempts[0]["status"] == "failed"

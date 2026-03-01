@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import shutil
 import subprocess
 import sys
@@ -128,6 +129,34 @@ def _should_offer_manual_auth_fallback(attempts: list[dict[str, str | int]]) -> 
     return False
 
 
+def _normalize_youtube_cookie_header(raw_value: str | None) -> str | None:
+    if not raw_value:
+        return None
+
+    value = raw_value.strip()
+    if not value:
+        return None
+
+    if "\n" in value:
+        for line in value.splitlines():
+            stripped = line.strip()
+            if stripped.lower().startswith("cookie:"):
+                candidate = stripped.split(":", 1)[1].strip()
+                return candidate or None
+
+    if value.lower().startswith("cookie:"):
+        value = value.split(":", 1)[1].strip()
+
+    # Heuristic: treat obvious full header blocks pasted on one line as invalid cookie values.
+    looks_like_header_blob = bool(re.search(r"\b(accept|user-agent|sec-ch-ua|referer):", value, re.IGNORECASE))
+    if looks_like_header_blob and "=" not in value:
+        return None
+
+    return value or None
+
+
+
+
 def _prompt_for_youtube_cookie_header(logger: Callable[[str], None] | None = None) -> str | None:
     if not sys.stdin.isatty():
         return None
@@ -135,11 +164,13 @@ def _prompt_for_youtube_cookie_header(logger: Callable[[str], None] | None = Non
     if logger:
         logger(
             "All automatic YouTube download strategies failed. "
-            "As a final fallback, you can provide a YouTube Cookie header from an authenticated browser session."
+            "As a final fallback, provide your YouTube Cookie header from a logged-in browser session. "
+            "If DevTools shows 'Provisional headers are shown' and no Cookie row, use DevTools -> Application/Storage -> Cookies -> https://www.youtube.com and copy key=value pairs, "
+            "or copy request headers and paste the full text so Chevron can extract the Cookie line."
         )
 
-    cookie_header = getpass("Paste YouTube Cookie header value (leave blank to skip): ").strip()
-    return cookie_header or None
+    cookie_header = getpass("Paste YouTube Cookie value (or a full header block) and press Enter (leave blank to skip): ")
+    return _normalize_youtube_cookie_header(cookie_header)
 
 
 def _attempt_manual_cookie_download(
@@ -170,13 +201,65 @@ def _download_youtube(
     url: str,
     cache_dir: Path,
     logger: Callable[[str], None] | None = None,
+    youtube_cookie_header: str | None = None,
+    youtube_cookies_from_browser: str | None = None,
 ) -> YouTubeDownloadResult:
     cache_dir.mkdir(parents=True, exist_ok=True)
     output_tmpl = str(cache_dir / "%(id)s.%(ext)s")
 
     strategies = _youtube_download_strategies()
+    if youtube_cookies_from_browser:
+        browser = str(youtube_cookies_from_browser).strip().lower()
+        if browser:
+            strategies = [
+                {
+                    "name": f"user_browser_cookies_{browser}",
+                    "args": [
+                        "--extractor-args",
+                        "youtube:player_client=web",
+                        "--cookies-from-browser",
+                        browser,
+                    ],
+                },
+                *strategies,
+            ]
     attempts: list[dict[str, str | int]] = []
     video_title = _resolve_youtube_title(url)
+
+    normalized_cookie_header = _normalize_youtube_cookie_header(youtube_cookie_header)
+
+    if normalized_cookie_header:
+        if logger:
+            logger(
+                "Attempting YouTube ingest with user-provided Cookie header "
+                "(from --youtube-cookie / CHEVRON_YOUTUBE_COOKIE)."
+            )
+        try:
+            latest = _attempt_manual_cookie_download(url, output_tmpl, cache_dir, normalized_cookie_header)
+            attempts.append({"strategy": "manual_cookie_header", "status": "success", "returncode": 0})
+            if logger:
+                logger(f"Ingest {_colored('succeeded', _GREEN)} using provided Cookie header.")
+            return YouTubeDownloadResult(
+                source_path=latest,
+                successful_strategy="manual_cookie_header",
+                successful_strategy_args=["--add-header", "Cookie: [REDACTED]"],
+                attempts=attempts,
+            )
+        except subprocess.CalledProcessError as err:
+            message = "\n".join([err.stdout or "", err.stderr or ""])
+            attempts.append(
+                {
+                    "strategy": "manual_cookie_header",
+                    "status": "failed",
+                    "returncode": int(err.returncode),
+                    "error": message.strip() or "unknown yt-dlp failure",
+                }
+            )
+            if logger:
+                logger("Provided Cookie header failed; retrying automatic YouTube strategies.")
+
+    elif youtube_cookie_header and logger:
+        logger("Provided --youtube-cookie value did not contain a usable Cookie header; retrying automatic YouTube strategies.")
 
     for strategy in strategies:
         cmd = ["yt-dlp", "-o", output_tmpl]
@@ -266,13 +349,21 @@ def ingest(
     out_dir: str | Path,
     fps: int = 30,
     logger: Callable[[str], None] | None = None,
+    youtube_cookie_header: str | None = None,
+    youtube_cookies_from_browser: str | None = None,
 ) -> dict:
     out = ensure_dir(out_dir)
     source_dir = ensure_dir(out / "source")
     proxy_path = out / "proxy.mp4"
 
     if url:
-        download_result = _download_youtube(url, source_dir, logger=logger)
+        download_result = _download_youtube(
+            url,
+            source_dir,
+            logger=logger,
+            youtube_cookie_header=youtube_cookie_header,
+            youtube_cookies_from_browser=youtube_cookies_from_browser,
+        )
         src = download_result.source_path
     elif video:
         src = Path(video)

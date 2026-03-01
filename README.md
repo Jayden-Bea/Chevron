@@ -46,6 +46,8 @@ pip install -e .[dev]
 
 ```bash
 chevron run --url "https://youtube.com/watch?v=..." --config configs/example_config.yml --out out_dir/
+# optional auth fallback for gated videos:
+# chevron run --url "https://youtube.com/watch?v=..." --config configs/example_config.yml --out out_dir/ --youtube-cookie "<COOKIE_VALUE>"
 # reruns automatically reuse existing ingest output in out_dir/workdir by default
 ```
 
@@ -54,6 +56,47 @@ For local files:
 ```bash
 chevron run --video /path/to/vod.mp4 --config configs/example_config.yml --out out_dir/
 ```
+
+
+### YouTube auth fallback (clear input instructions)
+
+**Fastest path (recommended): no manual cookie copying**
+
+```bash
+chevron ingest --url "https://youtube.com/watch?v=..." --out workdir/ --youtube-cookies-from-browser chrome
+# or with full pipeline:
+chevron run --url "https://youtube.com/watch?v=..." --config configs/example_config.yml --out out_dir/ --youtube-cookies-from-browser chrome
+```
+
+You can usually swap `chrome` for `edge` or `firefox` if needed. This is the lowest-effort option and avoids DevTools header hunting.
+
+If YouTube blocks anonymous download attempts (403 / "sign in to confirm you're not a bot"), Chevron supports a user-provided Cookie header fallback that is now available directly from the CLI via `--youtube-cookie` (or env var `CHEVRON_YOUTUBE_COOKIE`).
+
+1. Sign in to YouTube in your browser.
+2. Open browser DevTools → **Network** tab and reload `youtube.com`.
+3. Try to open a request that shows a `Cookie` header in **Request Headers**, then copy just the value.
+4. If DevTools says **"Provisional headers are shown"** and there is no cookie row, use one of these alternatives:
+   - DevTools **Application/Storage → Cookies → https://www.youtube.com** and copy `name=value` pairs, joined by `; `.
+   - Or copy the full request headers block (`Copy request headers`) and paste it directly; Chevron will extract the `Cookie:` line.
+5. Run Chevron with one of the options below:
+
+```bash
+chevron ingest --url "https://youtube.com/watch?v=..." --out workdir/ --youtube-cookie "<COOKIE_OR_HEADER_BLOCK>"
+
+# or
+export CHEVRON_YOUTUBE_COOKIE="<COOKIE_OR_HEADER_BLOCK>"
+chevron ingest --url "https://youtube.com/watch?v=..." --out workdir/
+
+# easiest persistent option (no manual cookie extraction):
+export CHEVRON_YOUTUBE_BROWSER="chrome"
+chevron ingest --url "https://youtube.com/watch?v=..." --out workdir/
+```
+
+Notes:
+- `--youtube-cookies-from-browser` / `CHEVRON_YOUTUBE_BROWSER` is the simplest path for most users.
+- The cookie is only used for YouTube ingest authentication fallback.
+- If a provided cookie fails, Chevron automatically retries built-in yt-dlp strategies.
+- Avoid sharing or committing cookie values; treat them as sensitive credentials.
 
 ## Incremental commands
 
