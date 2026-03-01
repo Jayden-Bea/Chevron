@@ -45,6 +45,11 @@ def test_render_matches_emits_progress_events(tmp_path):
     )
 
     assert len(outputs) == 1
+    match_dir = tmp_path / "matches" / "match_001"
+    assert (match_dir / "topdown_top.mp4").exists()
+    assert (match_dir / "topdown_bottom_left.mp4").exists()
+    assert (match_dir / "topdown_bottom_right.mp4").exists()
+    assert (match_dir / "topdown.mp4").exists()
     assert any(evt.get("event") == "match_start" for evt in events)
     assert any(evt.get("event") == "match_progress" for evt in events)
     assert any(evt.get("event") == "match_complete" for evt in events)
@@ -61,6 +66,9 @@ def test_render_matches_skips_existing_output(tmp_path):
     existing_dir = matches_dir / "match_001"
     existing_dir.mkdir(parents=True)
     (existing_dir / "topdown.mp4").write_bytes(b"already there")
+    (existing_dir / "topdown_top.mp4").write_bytes(b"already there")
+    (existing_dir / "topdown_bottom_left.mp4").write_bytes(b"already there")
+    (existing_dir / "topdown_bottom_right.mp4").write_bytes(b"already there")
     (existing_dir / "match_meta.json").write_text("{}", encoding="utf-8")
 
     segments = [{"start_time_s": 0.0, "end_time_s": 0.5}]
@@ -96,3 +104,43 @@ def test_render_matches_skips_existing_output(tmp_path):
     assert outputs == [str(existing_dir / "topdown.mp4")]
     assert any(evt.get("event") == "match_skipped" for evt in events)
     assert not any(evt.get("event") == "match_start" for evt in events)
+
+
+def test_render_matches_includes_output_manifest(tmp_path):
+    video_path = tmp_path / "input.mp4"
+    writer = cv2.VideoWriter(str(video_path), cv2.VideoWriter_fourcc(*"mp4v"), 10.0, (32, 32))
+    for _ in range(4):
+        writer.write(np.zeros((32, 32, 3), dtype=np.uint8))
+    writer.release()
+
+    segments = [{"start_time_s": 0.0, "end_time_s": 0.2}]
+    calib = {
+        "version": "v1",
+        "canvas": {"width_px": 16, "height_px": 16},
+        "homographies": {
+            "top": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            "bottom_left": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+            "bottom_right": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        },
+    }
+    cfg = {
+        "split": {
+            "crops": {
+                "top": [0, 0, 16, 16],
+                "bottom_left": [0, 16, 16, 16],
+                "bottom_right": [16, 16, 16, 16],
+            }
+        }
+    }
+
+    render_matches(str(video_path), segments, calib, cfg, tmp_path / "matches")
+
+    import json
+
+    payload = json.loads((tmp_path / "matches" / "match_001" / "match_meta.json").read_text(encoding="utf-8"))
+    assert payload["outputs"] == {
+        "combined": "topdown.mp4",
+        "top": "topdown_top.mp4",
+        "bottom_left": "topdown_bottom_left.mp4",
+        "bottom_right": "topdown_bottom_right.mp4",
+    }

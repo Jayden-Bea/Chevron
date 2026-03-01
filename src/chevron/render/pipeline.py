@@ -42,8 +42,11 @@ def render_matches(
     outputs = []
     safe_interval_s = max(0.1, float(progress_interval_s))
 
+    view_order = ["top", "bottom_left", "bottom_right"]
+
     for i, seg in enumerate(segments, start=1):
         match_dir = ensure_dir(out / f"match_{i:03d}")
+        view_output_paths = {view: match_dir / f"topdown_{view}.mp4" for view in view_order}
         output_path = match_dir / "topdown.mp4"
         meta_path = match_dir / "match_meta.json"
         start_idx = int(seg["start_time_s"] * source_fps)
@@ -51,7 +54,9 @@ def render_matches(
         total_match_frames = max((end_idx - start_idx + frame_step - 1) // frame_step, 0)
         frame_log_interval = max(1, int(round(safe_interval_s * fps)))
 
-        if skip_existing and output_path.exists() and meta_path.exists() and output_path.stat().st_size > 0:
+        expected_outputs = [output_path, *view_output_paths.values()]
+        has_all_outputs = all(path.exists() and path.stat().st_size > 0 for path in expected_outputs)
+        if skip_existing and has_all_outputs and meta_path.exists():
             outputs.append(str(output_path))
             if progress_callback:
                 progress_callback(
@@ -66,6 +71,8 @@ def render_matches(
             continue
 
         writer = VideoWriter(output_path, fps=fps, size=size)
+        view_writers = {view: VideoWriter(path, fps=fps, size=size) for view, path in view_output_paths.items()}
+        blank_frame = np.zeros((size[1], size[0], 3), dtype=np.uint8)
         cap.set(cv2.CAP_PROP_POS_FRAMES, start_idx)
 
         if progress_callback:
@@ -91,12 +98,23 @@ def render_matches(
                 break
             layers = []
             masks = []
-            for name, (x, y, w, h) in layout.items():
+            warped_views = {}
+            for name in view_order:
+                if name not in layout or name not in hs:
+                    continue
+                x, y, w, h = layout[name]
                 crop = frame[y : y + h, x : x + w]
                 warped = warp_to_canvas(crop, hs[name], size)
+                warped_views[name] = warped
                 mask = (warped.sum(axis=2) > 0).astype(np.float32)
                 layers.append(warped)
                 masks.append(mask)
+
+            for name, view_writer in view_writers.items():
+                view_writer.write(warped_views.get(name, blank_frame))
+
+            if not layers:
+                continue
             stitched = blend_layers(layers, masks)
             writer.write(stitched)
             frame_meta.append({"frame_idx": output_frame_idx, "t_video_s": frame_idx / source_fps, "t_match_s": None})
@@ -115,6 +133,8 @@ def render_matches(
                 )
             output_frame_idx += 1
         writer.close()
+        for view_writer in view_writers.values():
+            view_writer.close()
 
         meta = {
             "src_vod_start_s": seg["start_time_s"],
@@ -125,6 +145,10 @@ def render_matches(
             "frames": frame_meta,
             "config_hash": stable_hash(cfg),
             "calib_version": calib.get("version", "v1"),
+            "outputs": {
+                "combined": output_path.name,
+                **{view: path.name for view, path in view_output_paths.items()},
+            },
         }
         write_json(meta_path, meta)
         outputs.append(str(output_path))
