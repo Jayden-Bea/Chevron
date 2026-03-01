@@ -47,9 +47,11 @@ def _render_single_frame_preview(
     correspondences: dict,
     canvas_w: int,
     canvas_h: int,
+    views_to_render: list[str] | None = None,
 ) -> np.ndarray:
     preview = _build_field_canvas(canvas_w, canvas_h)
-    for view in VIEW_ORDER:
+    active_views = views_to_render if views_to_render is not None else VIEW_ORDER
+    for view in active_views:
         if view not in layout:
             continue
         pairs = correspondences.get(view) or {}
@@ -140,7 +142,14 @@ def run_local_verify(video: str, config: str, out_json: str | Path, frame_idx: i
             status = f"view={view} pairs={min(len(image_points), len(field_points))} pending={'yes' if pending_image_point else 'no'}"
             cv2.putText(crop_display, status, (12, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 0), 2)
             cv2.putText(field_display, status, (12, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 220, 0), 2)
-            preview_display = _render_single_frame_preview(frame, layout, correspondences, canvas_w, canvas_h)
+            preview_display = _render_single_frame_preview(
+                frame,
+                layout,
+                correspondences,
+                canvas_w,
+                canvas_h,
+                views_to_render=[view],
+            )
             preview_status = f"preview frame={frame_idx} step={view_index}/{len(views_to_verify)}"
             cv2.putText(preview_display, preview_status, (12, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             cv2.imshow(crop_win, crop_display)
