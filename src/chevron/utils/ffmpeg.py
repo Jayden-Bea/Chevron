@@ -5,8 +5,13 @@ from pathlib import Path
 
 
 def run_ffmpeg(args: list[str]) -> None:
-    cmd = ["ffmpeg", "-y", *args]
-    subprocess.run(cmd, check=True)
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args]
+    try:
+        subprocess.run(cmd, check=True, text=True, capture_output=True)
+    except subprocess.CalledProcessError as err:
+        stderr = (err.stderr or "").strip()
+        detail = f": {stderr}" if stderr else ""
+        raise RuntimeError(f"ffmpeg command failed{detail}") from err
 
 
 def normalize_video(in_path: str | Path, out_path: str | Path, fps: int = 30) -> None:

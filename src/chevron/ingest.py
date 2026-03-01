@@ -323,6 +323,10 @@ def _download_youtube(
             "Using yt-dlp version "
             f"{resolved_ytdlp_version} (minimum required: {_YTDLP_MIN_VERSION})."
         )
+        logger(
+            "Resolved video metadata; yt-dlp will now attempt to fetch media bytes. "
+            "If this step takes a while, the download is still in progress."
+        )
 
     attempts: list[dict[str, str | int]] = []
     video_title = _resolve_youtube_title(url)
@@ -377,6 +381,7 @@ def _download_youtube(
                 f"video={video_title!r} "
                 f"args={strategy['args'] or '[]'}"
             )
+            logger("yt-dlp accepted the request and is now downloading the media stream.")
 
         try:
             subprocess.run(cmd, check=True, text=True, capture_output=True)
