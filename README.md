@@ -48,6 +48,8 @@ pip install -e .[dev]
 chevron run --url "https://youtube.com/watch?v=..." --config configs/example_config.yml --out out_dir/
 # optional auth fallback for gated videos:
 # chevron run --url "https://youtube.com/watch?v=..." --config configs/example_config.yml --out out_dir/ --youtube-cookie "<COOKIE_VALUE>"
+# optional fast ingest trim for test clips:
+# chevron run --url "https://youtube.com/watch?v=..." --config configs/example_config.yml --out out_dir/ --start-at "00:10:00" --end-at "00:12:00"
 # reruns automatically reuse existing ingest output in out_dir/workdir by default
 ```
 
@@ -128,6 +130,14 @@ chevron segment --video workdir/proxy.mp4 --config configs/example_config.yml --
 chevron split --video workdir/proxy.mp4 --segments workdir/segments.json --config configs/example_config.yml --out workdir/splits/
 chevron render --video workdir/proxy.mp4 --segments workdir/segments.json --calib workdir/calib/calib.json --config configs/example_config.yml --out out_dir/
 ```
+
+Optional ingest trim for URL sources:
+
+```bash
+chevron ingest --url <vod_url> --out workdir/ --start-at "00:10:00" --end-at "00:12:00"
+```
+
+Both flags are required together and must use exact `HH:MM:SS` timestamps.
 
 Capture-area selector controls (`--select-capture-area`):
 - Scrub the frame trackbar to find a representative frame.

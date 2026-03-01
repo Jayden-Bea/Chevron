@@ -183,6 +183,10 @@ def test_ingest_parser_accepts_capture_area_selection_flags():
         "chrome",
         "--youtube-cookies-file",
         "cookies.txt",
+        "--start-at",
+        "00:01:00",
+        "--end-at",
+        "00:03:00",
         "--select-capture-area",
         "--capture-area-out",
         "workdir/custom_capture_area.json",
@@ -191,6 +195,8 @@ def test_ingest_parser_accepts_capture_area_selection_flags():
     assert args.youtube_cookie == "SID=fake"
     assert args.youtube_cookies_from_browser == "chrome"
     assert args.youtube_cookies_file == "cookies.txt"
+    assert args.start_at == "00:01:00"
+    assert args.end_at == "00:03:00"
     assert args.select_capture_area is True
     assert args.capture_area_out == "workdir/custom_capture_area.json"
 
@@ -202,9 +208,11 @@ def test_cmd_ingest_runs_capture_area_selector_when_enabled(monkeypatch, tmp_pat
 
     captured = {}
 
-    def fake_ingest(url, video, out_dir, fps, logger=None, youtube_cookie_header=None, youtube_cookies_from_browser=None, youtube_cookies_file=None):
+    def fake_ingest(url, video, out_dir, fps, logger=None, youtube_cookie_header=None, youtube_cookies_from_browser=None, youtube_cookies_file=None, start_at=None, end_at=None):
         proxy = tmp_path / "proxy.mp4"
         proxy.write_bytes(b"fake")
+        captured["start_at"] = start_at
+        captured["end_at"] = end_at
         return {"proxy": str(proxy)}
 
     def fake_select_capture_area(video_path, out_json):
@@ -229,12 +237,16 @@ def test_cmd_ingest_runs_capture_area_selector_when_enabled(monkeypatch, tmp_pat
         youtube_cookie=None,
         youtube_cookies_from_browser=None,
         youtube_cookies_file=None,
+        start_at="00:00:30",
+        end_at="00:02:00",
     )
 
     cmd_ingest(args)
 
     assert captured["video_path"].endswith("proxy.mp4")
     assert captured["out_json"].endswith("capture_area.json")
+    assert captured["start_at"] == "00:00:30"
+    assert captured["end_at"] == "00:02:00"
 
 
 
@@ -285,11 +297,17 @@ def test_run_parser_accepts_youtube_cookie():
         "chrome",
         "--youtube-cookies-file",
         "cookies.txt",
+        "--start-at",
+        "00:10:00",
+        "--end-at",
+        "00:12:00",
     ])
 
     assert args.youtube_cookie == "SID=fake"
     assert args.youtube_cookies_from_browser == "chrome"
     assert args.youtube_cookies_file == "cookies.txt"
+    assert args.start_at == "00:10:00"
+    assert args.end_at == "00:12:00"
 
 
 def test_cmd_run_processes_each_raw_match_clip_after_segmentation(monkeypatch, tmp_path):
@@ -314,7 +332,9 @@ def test_cmd_run_processes_each_raw_match_clip_after_segmentation(monkeypatch, t
 
     calls = {"verify_videos": [], "calibrate_videos": [], "render_videos": []}
 
-    def fake_ingest(url, video, out_dir, fps, logger=None, youtube_cookie_header=None, youtube_cookies_from_browser=None, youtube_cookies_file=None):
+    def fake_ingest(url, video, out_dir, fps, logger=None, youtube_cookie_header=None, youtube_cookies_from_browser=None, youtube_cookies_file=None, start_at=None, end_at=None):
+        calls["start_at"] = start_at
+        calls["end_at"] = end_at
         return {"proxy": str(proxy)}
 
     def fake_detect_segments(video, cfg, out, debug_dir, progress_interval_s, progress_callback):
@@ -367,12 +387,16 @@ def test_cmd_run_processes_each_raw_match_clip_after_segmentation(monkeypatch, t
         youtube_cookie=None,
         youtube_cookies_from_browser=None,
         youtube_cookies_file=None,
+        start_at="00:00:45",
+        end_at="00:03:15",
     )
 
     cmd_run(args)
 
     assert calls["raw_video"].endswith("proxy.mp4")
     assert calls["segment_video"].endswith("proxy_cropped.mp4")
+    assert calls["start_at"] == "00:00:45"
+    assert calls["end_at"] == "00:03:15"
     assert calls["verify_videos"][0].endswith("matches_raw/match_001.mp4")
     assert calls["calibrate_videos"][0].endswith("matches_raw/match_001.mp4")
     assert calls["render_videos"][0].endswith("matches_raw/match_001.mp4")
@@ -575,5 +599,4 @@ def test_cmd_detect_uses_config_overrides(monkeypatch, tmp_path):
     assert captured["settings"].scale_steps == 3
     assert captured["settings"].scale_min == 0.75
     assert captured["combine"] is False
-
 

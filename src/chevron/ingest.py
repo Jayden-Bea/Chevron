@@ -258,11 +258,29 @@ def _normalize_youtube_cookie_header(raw_value: str | None) -> str | None:
 
     return value or None
 
+
+def _build_download_sections_args(start_at: str | None, end_at: str | None) -> list[str]:
+    if not start_at and not end_at:
+        return []
+    if not start_at or not end_at:
+        raise ValueError("Both start_at and end_at are required when using download sections")
+
+    timestamp_pattern = re.compile(r"^\d{2}:\d{2}:\d{2}$")
+    start = start_at.strip()
+    end = end_at.strip()
+    if not timestamp_pattern.fullmatch(start):
+        raise ValueError(f"Invalid --start-at timestamp '{start_at}'. Expected HH:MM:SS")
+    if not timestamp_pattern.fullmatch(end):
+        raise ValueError(f"Invalid --end-at timestamp '{end_at}'. Expected HH:MM:SS")
+
+    return ["--download-sections", f"*{start}-{end}"]
+
 def _attempt_manual_cookie_download(
     url: str,
     output_tmpl: str,
     cache_dir: Path,
     cookie_header: str,
+    download_sections_args: list[str],
 ) -> Path:
     cmd = [
         "yt-dlp",
@@ -277,6 +295,7 @@ def _attempt_manual_cookie_download(
         "10",
         "--socket-timeout",
         "15",
+        *download_sections_args,
         url,
     ]
     subprocess.run(cmd, check=True, text=True, capture_output=True)
@@ -305,9 +324,12 @@ def _download_youtube(
     youtube_cookies_from_browser: str | None = None,
     youtube_cookies_file: str | Path | None = None,
     output_path: Path | None = None,
+    start_at: str | None = None,
+    end_at: str | None = None,
 ) -> YouTubeDownloadResult:
     cache_dir.mkdir(parents=True, exist_ok=True)
     output_tmpl = str(output_path) if output_path else str(cache_dir / "%(id)s.%(ext)s")
+    download_sections_args = _build_download_sections_args(start_at, end_at)
 
     strategies = _shuffle_youtube_strategies(url, _youtube_download_strategies())
     if youtube_cookies_from_browser:
@@ -369,7 +391,13 @@ def _download_youtube(
                 "(from --youtube-cookie / CHEVRON_YOUTUBE_COOKIE)."
             )
         try:
-            latest = _attempt_manual_cookie_download(url, output_tmpl, cache_dir, normalized_cookie_header)
+            latest = _attempt_manual_cookie_download(
+                url,
+                output_tmpl,
+                cache_dir,
+                normalized_cookie_header,
+                download_sections_args,
+            )
             attempts.append({"strategy": "manual_cookie_header", "status": "success", "returncode": 0})
             if logger:
                 logger(f"Ingest {_colored('succeeded', _GREEN)} using provided Cookie header.")
@@ -401,6 +429,7 @@ def _download_youtube(
     for strategy in strategies:
         cmd = ["yt-dlp", "-o", output_tmpl, *_YTDLP_PREFERRED_FORMAT_ARGS]
         cmd.extend(strategy["args"])
+        cmd.extend(download_sections_args)
         cmd.append(url)
 
         if logger:
@@ -475,6 +504,8 @@ def ingest(
     youtube_cookie_header: str | None = None,
     youtube_cookies_from_browser: str | None = None,
     youtube_cookies_file: str | Path | None = None,
+    start_at: str | None = None,
+    end_at: str | None = None,
 ) -> dict:
     out = ensure_dir(out_dir)
     source_dir = ensure_dir(out / "source")
@@ -489,6 +520,8 @@ def ingest(
             youtube_cookies_from_browser=youtube_cookies_from_browser,
             youtube_cookies_file=youtube_cookies_file,
             output_path=proxy_path,
+            start_at=start_at,
+            end_at=end_at,
         )
         source_path = download_result.source_path
     elif video:
