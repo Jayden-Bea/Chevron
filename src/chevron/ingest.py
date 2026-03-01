@@ -2,9 +2,12 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import sys
 from collections.abc import Callable
 from dataclasses import dataclass
+from getpass import getpass
 from pathlib import Path
+from shutil import which
 
 from .utils.ffmpeg import normalize_video
 from .utils.io import ensure_dir, write_json
@@ -49,7 +52,7 @@ def _resolve_youtube_title(url: str) -> str:
 
 def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
     # Ordered from least invasive to most aggressive compatibility workarounds.
-    return [
+    strategies: list[dict[str, str | list[str]]] = [
         {"name": "default", "args": []},
         {"name": "android", "args": ["--extractor-args", "youtube:player_client=android"]},
         {"name": "android_creator", "args": ["--extractor-args", "youtube:player_client=android_creator"]},
@@ -63,19 +66,104 @@ def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
         {"name": "ios", "args": ["--extractor-args", "youtube:player_client=ios"]},
         {"name": "tv", "args": ["--extractor-args", "youtube:player_client=tv"]},
         {"name": "tv_embedded", "args": ["--extractor-args", "youtube:player_client=tv_embedded"]},
-        {
-            "name": "android_ipv4",
-            "args": ["--extractor-args", "youtube:player_client=android", "--force-ipv4"],
-        },
-        {
-            "name": "web_ipv4",
-            "args": ["--extractor-args", "youtube:player_client=web", "--force-ipv4"],
-        },
-        {
-            "name": "ios_ipv4",
-            "args": ["--extractor-args", "youtube:player_client=ios", "--force-ipv4"],
-        },
     ]
+
+    network_profiles = [
+        ("ipv4", ["--force-ipv4"]),
+        ("relaxed_network", ["--geo-bypass", "--socket-timeout", "15", "--retries", "10"]),
+    ]
+
+    for profile_name, profile_args in network_profiles:
+        strategies.extend(
+            [
+                {
+                    "name": f"android_{profile_name}",
+                    "args": ["--extractor-args", "youtube:player_client=android", *profile_args],
+                },
+                {
+                    "name": f"web_{profile_name}",
+                    "args": ["--extractor-args", "youtube:player_client=web", *profile_args],
+                },
+                {
+                    "name": f"ios_{profile_name}",
+                    "args": ["--extractor-args", "youtube:player_client=ios", *profile_args],
+                },
+            ]
+        )
+
+    if which("firefox"):
+        strategies.append(
+            {
+                "name": "web_firefox_cookies",
+                "args": [
+                    "--extractor-args",
+                    "youtube:player_client=web",
+                    "--cookies-from-browser",
+                    "firefox",
+                ],
+            }
+        )
+
+    if which("google-chrome") or which("chromium"):
+        strategies.append(
+            {
+                "name": "web_chrome_cookies",
+                "args": [
+                    "--extractor-args",
+                    "youtube:player_client=web",
+                    "--cookies-from-browser",
+                    "chrome",
+                ],
+            }
+        )
+
+    return strategies
+
+
+def _should_offer_manual_auth_fallback(attempts: list[dict[str, str | int]]) -> bool:
+    for attempt in attempts:
+        error = str(attempt.get("error", "")).lower().replace("’", "'")
+        if "sign in" in error or "not a bot" in error or "403" in error or "forbidden" in error:
+            return True
+    return False
+
+
+def _prompt_for_youtube_cookie_header(logger: Callable[[str], None] | None = None) -> str | None:
+    if not sys.stdin.isatty():
+        return None
+
+    if logger:
+        logger(
+            "All automatic YouTube download strategies failed. "
+            "As a final fallback, you can provide a YouTube Cookie header from an authenticated browser session."
+        )
+
+    cookie_header = getpass("Paste YouTube Cookie header value (leave blank to skip): ").strip()
+    return cookie_header or None
+
+
+def _attempt_manual_cookie_download(
+    url: str,
+    output_tmpl: str,
+    cache_dir: Path,
+    cookie_header: str,
+) -> Path:
+    cmd = [
+        "yt-dlp",
+        "-o",
+        output_tmpl,
+        "--extractor-args",
+        "youtube:player_client=web",
+        "--add-header",
+        f"Cookie: {cookie_header}",
+        "--retries",
+        "10",
+        "--socket-timeout",
+        "15",
+        url,
+    ]
+    subprocess.run(cmd, check=True, text=True, capture_output=True)
+    return max(cache_dir.glob("*"), key=lambda p: p.stat().st_mtime)
 
 
 def _download_youtube(
@@ -132,6 +220,38 @@ def _download_youtube(
             if logger:
                 logger(f"Ingest {_colored('failed', _RED)}.")
             continue
+
+    if _should_offer_manual_auth_fallback(attempts):
+        cookie_header = _prompt_for_youtube_cookie_header(logger=logger)
+        if cookie_header:
+            try:
+                latest = _attempt_manual_cookie_download(url, output_tmpl, cache_dir, cookie_header)
+                attempts.append({"strategy": "manual_cookie_header", "status": "success", "returncode": 0})
+                if logger:
+                    logger(f"Ingest {_colored('succeeded', _GREEN)} using manual Cookie header fallback.")
+                return YouTubeDownloadResult(
+                    source_path=latest,
+                    successful_strategy="manual_cookie_header",
+                    successful_strategy_args=["--add-header", "Cookie: [REDACTED]"],
+                    attempts=attempts,
+                )
+            except FileNotFoundError as err:
+                raise RuntimeError(
+                    "yt-dlp is required for URL ingestion but was not found on PATH. "
+                    "Install yt-dlp and retry, or use --video with a local file."
+                ) from err
+            except subprocess.CalledProcessError as err:
+                message = "\n".join([err.stdout or "", err.stderr or ""])
+                attempts.append(
+                    {
+                        "strategy": "manual_cookie_header",
+                        "status": "failed",
+                        "returncode": int(err.returncode),
+                        "error": message.strip() or "unknown yt-dlp failure",
+                    }
+                )
+                if logger:
+                    logger(f"Manual auth fallback {_colored('failed', _RED)}.")
 
     last_error = attempts[-1].get("error", "unknown yt-dlp failure") if attempts else "unknown yt-dlp failure"
     raise RuntimeError(

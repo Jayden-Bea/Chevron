@@ -101,6 +101,17 @@ def test_download_youtube_strategies_are_exhaustive_enough_for_fallbacks():
     assert "ios" in names
     assert "tv_embedded" in names
     assert "android_ipv4" in names
+    assert "web_relaxed_network" in names
+
+
+def test_download_youtube_strategies_include_browser_cookie_fallbacks(monkeypatch):
+    monkeypatch.setattr("chevron.ingest.which", lambda command: "/usr/bin/fake" if command in {"firefox", "chromium"} else None)
+
+    strategies = _youtube_download_strategies()
+    names = [strategy["name"] for strategy in strategies]
+
+    assert "web_firefox_cookies" in names
+    assert "web_chrome_cookies" in names
 
 
 def test_download_youtube_raises_runtime_error_when_ytdlp_missing(monkeypatch, tmp_path: Path):
@@ -112,3 +123,61 @@ def test_download_youtube_raises_runtime_error_when_ytdlp_missing(monkeypatch, t
 
     with pytest.raises(RuntimeError, match="yt-dlp is required"):
         _download_youtube("https://youtube.com/watch?v=abc123", tmp_path)
+
+
+def test_download_youtube_prompts_for_manual_cookie_only_after_strategy_exhaustion(monkeypatch, tmp_path: Path):
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, check, text, capture_output):
+        calls.append(cmd)
+        if "--add-header" in cmd:
+            out_file = tmp_path / "manual.mp4"
+            out_file.write_bytes(b"video")
+            return None
+
+        raise subprocess.CalledProcessError(
+            returncode=1,
+            cmd=cmd,
+            output="",
+            stderr="Sign in to confirm you're not a bot",
+        )
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+    monkeypatch.setattr("chevron.ingest._prompt_for_youtube_cookie_header", lambda logger=None: "SID=fake")
+
+    result = _download_youtube("https://youtube.com/watch?v=abc123", tmp_path)
+
+    assert result.successful_strategy == "manual_cookie_header"
+    assert result.successful_strategy_args == ["--add-header", "Cookie: [REDACTED]"]
+    assert result.source_path.name == "manual.mp4"
+    assert result.attempts[-1]["strategy"] == "manual_cookie_header"
+    assert "--add-header" in calls[-1]
+
+
+def test_download_youtube_does_not_prompt_manual_cookie_before_exhaustion(monkeypatch, tmp_path: Path):
+    calls = {"count": 0}
+
+    def fake_run(cmd, check, text, capture_output):
+        calls["count"] += 1
+        if calls["count"] == 2:
+            out_file = tmp_path / "auto.mp4"
+            out_file.write_bytes(b"video")
+            return None
+        raise subprocess.CalledProcessError(returncode=1, cmd=cmd, output="", stderr="403 Forbidden")
+
+    monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
+    monkeypatch.setattr("subprocess.run", fake_run)
+
+    prompted = {"value": False}
+
+    def fake_prompt(logger=None):
+        prompted["value"] = True
+        return "SID=fake"
+
+    monkeypatch.setattr("chevron.ingest._prompt_for_youtube_cookie_header", fake_prompt)
+
+    result = _download_youtube("https://youtube.com/watch?v=abc123", tmp_path)
+
+    assert result.successful_strategy == "android"
+    assert prompted["value"] is False
