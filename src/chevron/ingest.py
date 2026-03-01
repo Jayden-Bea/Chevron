@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
 from .utils.ffmpeg import normalize_video
 from .utils.io import ensure_dir, write_json
+
+
+@dataclass
+class YouTubeDownloadResult:
+    source_path: Path
+    successful_strategy: str
+    attempts: list[dict[str, str | int]]
 
 
 def _is_retryable_ytdlp_error(message: str) -> bool:
@@ -17,29 +25,58 @@ def _is_retryable_ytdlp_error(message: str) -> bool:
     return is_403 or is_429 or is_outdated_client or is_bot_challenge
 
 
-def _download_youtube(url: str, cache_dir: Path) -> Path:
+def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
+    # Ordered from least invasive to most aggressive compatibility workarounds.
+    return [
+        {"name": "default", "args": []},
+        {"name": "android", "args": ["--extractor-args", "youtube:player_client=android"]},
+        {"name": "android_creator", "args": ["--extractor-args", "youtube:player_client=android_creator"]},
+        {"name": "android_music", "args": ["--extractor-args", "youtube:player_client=android_music"]},
+        {"name": "android_vr", "args": ["--extractor-args", "youtube:player_client=android_vr"]},
+        {"name": "web", "args": ["--extractor-args", "youtube:player_client=web"]},
+        {"name": "web_creator", "args": ["--extractor-args", "youtube:player_client=web_creator"]},
+        {"name": "web_embedded", "args": ["--extractor-args", "youtube:player_client=web_embedded"]},
+        {"name": "web_music", "args": ["--extractor-args", "youtube:player_client=web_music"]},
+        {"name": "mweb", "args": ["--extractor-args", "youtube:player_client=mweb"]},
+        {"name": "ios", "args": ["--extractor-args", "youtube:player_client=ios"]},
+        {"name": "tv", "args": ["--extractor-args", "youtube:player_client=tv"]},
+        {"name": "tv_embedded", "args": ["--extractor-args", "youtube:player_client=tv_embedded"]},
+        {
+            "name": "android_ipv4",
+            "args": ["--extractor-args", "youtube:player_client=android", "--force-ipv4"],
+        },
+        {
+            "name": "web_ipv4",
+            "args": ["--extractor-args", "youtube:player_client=web", "--force-ipv4"],
+        },
+        {
+            "name": "ios_ipv4",
+            "args": ["--extractor-args", "youtube:player_client=ios", "--force-ipv4"],
+        },
+    ]
+
+
+def _download_youtube(url: str, cache_dir: Path) -> YouTubeDownloadResult:
     cache_dir.mkdir(parents=True, exist_ok=True)
     output_tmpl = str(cache_dir / "%(id)s.%(ext)s")
 
-    client_settings = [
-        None,
-        "android",
-        "web",
-        "ios",
-        "tv_embedded",
-    ]
+    strategies = _youtube_download_strategies()
+    attempts: list[dict[str, str | int]] = []
 
-    last_error_message = ""
-
-    for idx, client in enumerate(client_settings):
+    for strategy in strategies:
         cmd = ["yt-dlp", "-o", output_tmpl]
-        if client is not None:
-            cmd.extend(["--extractor-args", f"youtube:player_client={client}"])
+        cmd.extend(strategy["args"])
         cmd.append(url)
 
         try:
             subprocess.run(cmd, check=True, text=True, capture_output=True)
-            break
+            latest = max(cache_dir.glob("*"), key=lambda p: p.stat().st_mtime)
+            attempts.append({"strategy": strategy["name"], "status": "success", "returncode": 0})
+            return YouTubeDownloadResult(
+                source_path=latest,
+                successful_strategy=strategy["name"],
+                attempts=attempts,
+            )
         except FileNotFoundError as err:
             raise RuntimeError(
                 "yt-dlp is required for URL ingestion but was not found on PATH. "
@@ -47,19 +84,20 @@ def _download_youtube(url: str, cache_dir: Path) -> Path:
             ) from err
         except subprocess.CalledProcessError as err:
             message = "\n".join([err.stdout or "", err.stderr or ""])
-            last_error_message = message.strip()
-            is_last_client = idx == len(client_settings) - 1
-            if _is_retryable_ytdlp_error(message) and not is_last_client:
-                continue
-            if _is_retryable_ytdlp_error(message) and is_last_client:
-                raise RuntimeError(
-                    "yt-dlp could not download the URL after trying multiple YouTube clients. "
-                    f"Last error: {last_error_message or 'unknown yt-dlp failure'}"
-                ) from err
-            raise
+            attempts.append(
+                {
+                    "strategy": strategy["name"],
+                    "status": "retryable" if _is_retryable_ytdlp_error(message) else "failed",
+                    "returncode": int(err.returncode),
+                    "error": message.strip() or "unknown yt-dlp failure",
+                }
+            )
 
-    latest = max(cache_dir.glob("*"), key=lambda p: p.stat().st_mtime)
-    return latest
+    last_error = attempts[-1].get("error", "unknown yt-dlp failure") if attempts else "unknown yt-dlp failure"
+    raise RuntimeError(
+        "yt-dlp could not download the URL after exhausting all configured YouTube connection strategies. "
+        f"Last error: {last_error}"
+    )
 
 
 def ingest(url: str | None, video: str | None, out_dir: str | Path, fps: int = 30) -> dict:
@@ -68,9 +106,11 @@ def ingest(url: str | None, video: str | None, out_dir: str | Path, fps: int = 3
     proxy_path = out / "proxy.mp4"
 
     if url:
-        src = _download_youtube(url, source_dir)
+        download_result = _download_youtube(url, source_dir)
+        src = download_result.source_path
     elif video:
         src = Path(video)
+        download_result = None
     else:
         raise ValueError("One of url or video must be provided")
 
@@ -85,5 +125,10 @@ def ingest(url: str | None, video: str | None, out_dir: str | Path, fps: int = 3
         "proxy": str(proxy_path),
         "fps": fps,
     }
+    if download_result:
+        meta["youtube_download"] = {
+            "successful_strategy": download_result.successful_strategy,
+            "attempts": download_result.attempts,
+        }
     write_json(out / "ingest_meta.json", meta)
     return meta

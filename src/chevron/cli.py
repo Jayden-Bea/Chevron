@@ -8,6 +8,7 @@ from pathlib import Path
 from time import monotonic, time
 
 from .utils.config import load_config
+from .utils.ffmpeg import crop_video
 from .utils.io import ensure_dir, read_json, write_json
 
 
@@ -198,7 +199,20 @@ def cmd_ingest(args):
     from .ingest import ingest
 
     _log("[chevron] ingest: starting")
-    ingest(url=args.url, video=args.video, out_dir=args.out, fps=args.fps)
+    meta = ingest(url=args.url, video=args.video, out_dir=args.out, fps=args.fps)
+
+    if args.select_capture_area:
+        from .ui.capture_area_selector import select_capture_area
+
+        proxy = meta.get("proxy")
+        if not proxy:
+            raise RuntimeError("Ingest did not produce a proxy video for capture-area selection")
+
+        capture_area_out = Path(args.capture_area_out) if args.capture_area_out else Path(args.out) / "capture_area.json"
+        _log(f"[chevron] ingest: opening capture-area selector -> {proxy}")
+        capture_area = select_capture_area(proxy, capture_area_out)
+        _log(f"[chevron] ingest: capture area saved -> {capture_area_out} ({capture_area})")
+
     _log("[chevron] ingest: complete")
 
 
@@ -219,6 +233,29 @@ def _load_existing_ingest_meta(workdir: Path) -> dict | None:
     if not proxy.exists():
         return None
     return meta
+
+
+def _resolve_pipeline_video(proxy: str | Path, workdir: Path) -> str:
+    proxy_path = Path(proxy)
+    capture_area_path = workdir / "capture_area.json"
+    if not capture_area_path.exists():
+        return str(proxy_path)
+
+    capture_area = read_json(capture_area_path)
+    required = ("x", "y", "w", "h")
+    if not all(k in capture_area for k in required):
+        raise RuntimeError(f"Invalid capture area json at {capture_area_path}: expected keys {required}")
+
+    x = int(capture_area["x"])
+    y = int(capture_area["y"])
+    w = int(capture_area["w"])
+    h = int(capture_area["h"])
+    if w <= 0 or h <= 0:
+        raise RuntimeError(f"Invalid capture area dimensions in {capture_area_path}: w={w}, h={h}")
+
+    cropped_proxy = workdir / "proxy_cropped.mp4"
+    crop_video(proxy_path, cropped_proxy, x=x, y=y, w=w, h=h)
+    return str(cropped_proxy)
 
 
 def _load_existing_calibration(calib_path: Path) -> dict | None:
@@ -358,18 +395,19 @@ def cmd_run(args):
         _write_run_status(run_status_path, "ingest_reused", {"proxy": ingest_meta.get("proxy")})
 
     proxy = ingest_meta["proxy"]
+    pipeline_video = _resolve_pipeline_video(proxy, workdir)
     segments_path = workdir / "segments.json"
     _log("[chevron] run: segment stage")
     from .segment.detector import detect_segments
 
-    _write_run_status(run_status_path, "segment_starting", {"video": proxy})
+    _write_run_status(run_status_path, "segment_starting", {"video": pipeline_video})
 
     def _on_segment_progress(details: dict) -> None:
         _log(_format_segment_progress(details))
         _write_run_status(run_status_path, "segment_running", details)
 
     detect_segments(
-        proxy,
+        pipeline_video,
         cfg,
         segments_path,
         debug_dir=workdir / "segment_debug",
@@ -399,14 +437,14 @@ def cmd_run(args):
         run_status_path,
         "verify_starting",
         {
-            "video": proxy,
+            "video": pipeline_video,
             "config": args.config,
             "frame_idx": verify_frame_idx,
             "skip_match_segments": verify_skip_segments,
         },
     )
     verify_namespace = argparse.Namespace(
-        video=proxy,
+        video=pipeline_video,
         config=args.config,
         out=str(verify_out),
         frame=verify_frame_idx,
@@ -414,11 +452,11 @@ def cmd_run(args):
     cmd_verify(verify_namespace)
     verified = read_json(verify_out)
     correspondences = verified.get("correspondences", {})
-    _write_run_status(run_status_path, "verify_complete", {"video": proxy, "config": args.config, "out": str(verify_out)})
+    _write_run_status(run_status_path, "verify_complete", {"video": pipeline_video, "config": args.config, "out": str(verify_out)})
 
     _log("[chevron] run: calibrate stage")
     _write_run_status(run_status_path, "calibrate_starting", {"out": str(calib_out)})
-    namespace = argparse.Namespace(video=proxy, config=args.config, out=calib_out, correspondences=correspondences)
+    namespace = argparse.Namespace(video=pipeline_video, config=args.config, out=calib_out, correspondences=correspondences)
     cmd_calibrate(namespace)
     calib = read_json(calib_path)
     _write_run_status(run_status_path, "calibrate_complete", {"calib": str(calib_path)})
@@ -433,13 +471,13 @@ def cmd_run(args):
     _log("[chevron] run: render stage")
     from .render.pipeline import render_matches
 
-    _write_run_status(run_status_path, "render_starting", {"matches_out": str(work / "matches")})
+    _write_run_status(run_status_path, "render_starting", {"matches_out": str(work / "matches"), "video": pipeline_video})
     def _on_render_progress(details: dict) -> None:
         _log(_format_render_progress(details))
         _write_run_status(run_status_path, "render_running", details)
 
     render_matches(
-        proxy,
+        pipeline_video,
         seg,
         calib,
         cfg,
@@ -461,6 +499,8 @@ def build_parser():
     s.add_argument("--video")
     s.add_argument("--out", required=True)
     s.add_argument("--fps", type=int, default=30)
+    s.add_argument("--select-capture-area", action="store_true")
+    s.add_argument("--capture-area-out", required=False)
     s.set_defaults(func=cmd_ingest)
 
     s = sub.add_parser("segment")

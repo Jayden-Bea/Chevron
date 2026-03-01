@@ -8,8 +8,11 @@ from chevron.cli import (
     _log,
     _load_existing_calibration,
     _resolve_output_fps,
+    _resolve_pipeline_video,
     build_parser,
     cmd_detect,
+    cmd_ingest,
+    cmd_run,
 )
 
 
@@ -162,6 +165,169 @@ def test_verify_parser_requires_output_path():
 
     assert args.out.endswith("verify_correspondences.json")
 
+
+
+
+def test_ingest_parser_accepts_capture_area_selection_flags():
+    parser = build_parser()
+
+    args = parser.parse_args([
+        "ingest",
+        "--video",
+        "workdir/proxy.mp4",
+        "--out",
+        "workdir",
+        "--select-capture-area",
+        "--capture-area-out",
+        "workdir/custom_capture_area.json",
+    ])
+
+    assert args.select_capture_area is True
+    assert args.capture_area_out == "workdir/custom_capture_area.json"
+
+
+def test_cmd_ingest_runs_capture_area_selector_when_enabled(monkeypatch, tmp_path):
+    import argparse
+    import sys
+    import types
+
+    captured = {}
+
+    def fake_ingest(url, video, out_dir, fps):
+        proxy = tmp_path / "proxy.mp4"
+        proxy.write_bytes(b"fake")
+        return {"proxy": str(proxy)}
+
+    def fake_select_capture_area(video_path, out_json):
+        captured["video_path"] = video_path
+        captured["out_json"] = str(out_json)
+        return {"x": 10, "y": 20, "w": 100, "h": 80, "frame_idx": 0}
+
+    monkeypatch.setitem(sys.modules, "chevron.ingest", types.SimpleNamespace(ingest=fake_ingest))
+    monkeypatch.setitem(
+        sys.modules,
+        "chevron.ui.capture_area_selector",
+        types.SimpleNamespace(select_capture_area=fake_select_capture_area),
+    )
+
+    args = argparse.Namespace(
+        url=None,
+        video="input.mp4",
+        out=str(tmp_path),
+        fps=10,
+        select_capture_area=True,
+        capture_area_out=None,
+    )
+
+    cmd_ingest(args)
+
+    assert captured["video_path"].endswith("proxy.mp4")
+    assert captured["out_json"].endswith("capture_area.json")
+
+
+
+def test_resolve_pipeline_video_uses_proxy_when_no_capture_area(tmp_path):
+    proxy = tmp_path / "proxy.mp4"
+    proxy.write_bytes(b"proxy")
+
+    resolved = _resolve_pipeline_video(str(proxy), tmp_path)
+
+    assert resolved == str(proxy)
+
+
+def test_resolve_pipeline_video_crops_when_capture_area_exists(monkeypatch, tmp_path):
+    proxy = tmp_path / "proxy.mp4"
+    proxy.write_bytes(b"proxy")
+    (tmp_path / "capture_area.json").write_text('{"x": 11, "y": 22, "w": 333, "h": 444}', encoding="utf-8")
+
+    captured = {}
+
+    def fake_crop_video(in_path, out_path, x, y, w, h):
+        captured["in_path"] = str(in_path)
+        captured["out_path"] = str(out_path)
+        captured["crop"] = (x, y, w, h)
+
+    monkeypatch.setattr("chevron.cli.crop_video", fake_crop_video)
+
+    resolved = _resolve_pipeline_video(str(proxy), tmp_path)
+
+    assert captured["in_path"].endswith("proxy.mp4")
+    assert captured["out_path"].endswith("proxy_cropped.mp4")
+    assert captured["crop"] == (11, 22, 333, 444)
+    assert resolved.endswith("proxy_cropped.mp4")
+
+
+def test_cmd_run_uses_full_proxy_for_raw_export_and_cropped_video_for_pipeline(monkeypatch, tmp_path):
+    import argparse
+    import sys
+    import types
+
+    cfg_path = tmp_path / "config.yml"
+    cfg_path.write_text("""field:
+  width_units: 54
+  height_units: 27
+  px_per_unit: 10
+""", encoding="utf-8")
+
+    out_dir = tmp_path / "out"
+    workdir = out_dir / "workdir"
+    workdir.mkdir(parents=True)
+
+    proxy = workdir / "proxy.mp4"
+    proxy.write_bytes(b"proxy")
+    (workdir / "capture_area.json").write_text('{"x": 1, "y": 2, "w": 30, "h": 40}', encoding="utf-8")
+
+    calls = {}
+
+    def fake_ingest(url, video, out_dir, fps):
+        return {"proxy": str(proxy)}
+
+    def fake_detect_segments(video, cfg, out, debug_dir, progress_interval_s, progress_callback):
+        calls["segment_video"] = str(video)
+        Path(out).write_text('{"segments": [{"start_time_s": 0.0, "end_time_s": 1.0}], "fps": 30}', encoding="utf-8")
+
+    def fake_cmd_verify(ns):
+        Path(ns.out).write_text('{"correspondences": {}}', encoding="utf-8")
+
+    def fake_cmd_calibrate(ns):
+        Path(ns.out).mkdir(parents=True, exist_ok=True)
+        (Path(ns.out) / "calib.json").write_text('{"version": "v1"}', encoding="utf-8")
+
+    def fake_export_raw(video_path, segments, out_dir, output_fps=None):
+        calls["raw_video"] = str(video_path)
+        return []
+
+    def fake_render_matches(video, seg, calib, cfg, out, output_fps, progress_interval_s, progress_callback):
+        calls["render_video"] = str(video)
+
+    def fake_crop_video(in_path, out_path, x, y, w, h):
+        Path(out_path).write_bytes(b"cropped")
+
+    monkeypatch.setitem(sys.modules, "chevron.ingest", types.SimpleNamespace(ingest=fake_ingest))
+    monkeypatch.setitem(sys.modules, "chevron.segment.detector", types.SimpleNamespace(detect_segments=fake_detect_segments))
+    monkeypatch.setitem(sys.modules, "chevron.render.pipeline", types.SimpleNamespace(render_matches=fake_render_matches))
+    monkeypatch.setattr("chevron.cli.cmd_verify", fake_cmd_verify)
+    monkeypatch.setattr("chevron.cli.cmd_calibrate", fake_cmd_calibrate)
+    monkeypatch.setattr("chevron.cli._export_raw_matches", fake_export_raw)
+    monkeypatch.setattr("chevron.cli.crop_video", fake_crop_video)
+
+    args = argparse.Namespace(
+        url=None,
+        video="input.mp4",
+        config=str(cfg_path),
+        out=str(out_dir),
+        fps=30,
+        resume=False,
+        verify_port=8501,
+        verify_host="127.0.0.1",
+        verify_browser=False,
+    )
+
+    cmd_run(args)
+
+    assert calls["raw_video"].endswith("proxy.mp4")
+    assert calls["segment_video"].endswith("proxy_cropped.mp4")
+    assert calls["render_video"].endswith("proxy_cropped.mp4")
 
 def test_run_parser_defaults_resume_enabled():
     parser = build_parser()

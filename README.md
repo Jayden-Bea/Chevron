@@ -59,11 +59,19 @@ chevron run --video /path/to/vod.mp4 --config configs/example_config.yml --out o
 
 ```bash
 chevron ingest --url <vod_url> --out workdir/
+# optional: after ingest, open a scrubbable OpenCV viewer and drag-select a match capture area
+chevron ingest --url <vod_url> --out workdir/ --select-capture-area
 chevron segment --video workdir/proxy.mp4 --config configs/example_config.yml --out workdir/segments.json
 chevron split --video workdir/proxy.mp4 --segments workdir/segments.json --config configs/example_config.yml --out workdir/splits/
 chevron calibrate --video workdir/proxy.mp4 --config configs/example_config.yml --out workdir/calib/
 chevron render --video workdir/proxy.mp4 --segments workdir/segments.json --calib workdir/calib/calib.json --config configs/example_config.yml --out out_dir/
 ```
+
+Capture-area selector controls (`--select-capture-area`):
+- Scrub the frame trackbar to find a representative frame.
+- Press `b` to drag a rectangle.
+- Press `Enter` or `s` to save to `workdir/capture_area.json` (or `--capture-area-out`).
+- During `chevron run`, if `workdir/capture_area.json` exists, segmentation/verify/calibrate/render use a cropped proxy (`workdir/proxy_cropped.mp4`), while `matches_raw` export still uses the full-frame ingest proxy.
 
 
 ## Verify config (local OpenCV UI)
