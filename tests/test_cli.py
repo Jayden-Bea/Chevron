@@ -292,7 +292,7 @@ def test_run_parser_accepts_youtube_cookie():
     assert args.youtube_cookies_file == "cookies.txt"
 
 
-def test_cmd_run_uses_full_proxy_for_raw_export_and_cropped_video_for_pipeline(monkeypatch, tmp_path):
+def test_cmd_run_processes_each_raw_match_clip_after_segmentation(monkeypatch, tmp_path):
     import argparse
     import sys
     import types
@@ -312,28 +312,35 @@ def test_cmd_run_uses_full_proxy_for_raw_export_and_cropped_video_for_pipeline(m
     proxy.write_bytes(b"proxy")
     (workdir / "capture_area.json").write_text('{"x": 1, "y": 2, "w": 30, "h": 40}', encoding="utf-8")
 
-    calls = {}
+    calls = {"verify_videos": [], "calibrate_videos": [], "render_videos": []}
 
     def fake_ingest(url, video, out_dir, fps, logger=None, youtube_cookie_header=None, youtube_cookies_from_browser=None, youtube_cookies_file=None):
         return {"proxy": str(proxy)}
 
     def fake_detect_segments(video, cfg, out, debug_dir, progress_interval_s, progress_callback):
         calls["segment_video"] = str(video)
-        Path(out).write_text('{"segments": [{"start_time_s": 0.0, "end_time_s": 1.0}], "fps": 30}', encoding="utf-8")
+        Path(out).write_text('{"segments": [{"start_time_s": 5.0, "end_time_s": 10.0}], "fps": 30}', encoding="utf-8")
 
     def fake_cmd_verify(ns):
+        calls["verify_videos"].append(ns.video)
+        Path(ns.out).parent.mkdir(parents=True, exist_ok=True)
         Path(ns.out).write_text('{"correspondences": {}}', encoding="utf-8")
 
     def fake_cmd_calibrate(ns):
+        calls["calibrate_videos"].append(ns.video)
         Path(ns.out).mkdir(parents=True, exist_ok=True)
         (Path(ns.out) / "calib.json").write_text('{"version": "v1"}', encoding="utf-8")
 
     def fake_export_raw(video_path, segments, out_dir, output_fps=None):
         calls["raw_video"] = str(video_path)
-        return []
+        clip = Path(out_dir) / "match_001.mp4"
+        clip.parent.mkdir(parents=True, exist_ok=True)
+        clip.write_bytes(b"clip")
+        return [str(clip)]
 
     def fake_render_matches(video, seg, calib, cfg, out, output_fps, progress_interval_s, progress_callback):
-        calls["render_video"] = str(video)
+        calls["render_videos"].append(str(video))
+        calls["render_segments"] = seg
 
     def fake_crop_video(in_path, out_path, x, y, w, h):
         Path(out_path).write_bytes(b"cropped")
@@ -345,6 +352,7 @@ def test_cmd_run_uses_full_proxy_for_raw_export_and_cropped_video_for_pipeline(m
     monkeypatch.setattr("chevron.cli.cmd_calibrate", fake_cmd_calibrate)
     monkeypatch.setattr("chevron.cli._export_raw_matches", fake_export_raw)
     monkeypatch.setattr("chevron.cli.crop_video", fake_crop_video)
+    monkeypatch.setattr("chevron.cli._probe_video_duration_s", lambda _p: 123.4)
 
     args = argparse.Namespace(
         url=None,
@@ -365,7 +373,11 @@ def test_cmd_run_uses_full_proxy_for_raw_export_and_cropped_video_for_pipeline(m
 
     assert calls["raw_video"].endswith("proxy.mp4")
     assert calls["segment_video"].endswith("proxy_cropped.mp4")
-    assert calls["render_video"].endswith("proxy_cropped.mp4")
+    assert calls["verify_videos"][0].endswith("matches_raw/match_001.mp4")
+    assert calls["calibrate_videos"][0].endswith("matches_raw/match_001.mp4")
+    assert calls["render_videos"][0].endswith("matches_raw/match_001.mp4")
+    assert calls["render_segments"] == [{"start_time_s": 0.0, "end_time_s": 123.4}]
+    assert not proxy.exists()
 
 def test_run_parser_defaults_resume_enabled():
     parser = build_parser()

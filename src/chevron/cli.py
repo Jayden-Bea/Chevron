@@ -8,6 +8,7 @@ import sys
 from pathlib import Path
 from time import monotonic, time
 
+
 from .utils.config import load_config
 from .utils.ffmpeg import crop_video
 from .utils.io import ensure_dir, read_json, write_json
@@ -158,6 +159,20 @@ def _resolve_output_fps(cfg: dict, cli_fps: int) -> int:
     if value <= 0:
         raise ValueError("processing.output_fps must be > 0")
     return value
+
+
+def _probe_video_duration_s(video_path: str | Path) -> float:
+    import cv2
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError(f"Unable to open video for duration probing: {video_path}")
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    frame_count = float(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0.0)
+    cap.release()
+    if fps <= 0.0 or frame_count <= 0.0:
+        raise RuntimeError(f"Unable to determine fps/frame count for clip: {video_path}")
+    return frame_count / fps
 
 
 def cmd_detect(args):
@@ -441,76 +456,100 @@ def cmd_run(args):
     )
     segment_payload = read_json(segments_path)
     segments = segment_payload.get("segments", [])
-    segment_fps = float(segment_payload.get("fps") or 0.0)
     _write_run_status(run_status_path, "segment_complete", {"segments": str(segments_path)})
 
-    calib_out = workdir / "calib"
-    calib_path = calib_out / "calib.json"
-    verify_out = workdir / "verify_correspondences.json"
-    verify_skip_segments = max(0, int(((cfg.get("verify") or {}).get("skip_match_segments") or 0)))
-    verify_frame_idx = 0
-    if segment_fps > 0 and verify_skip_segments < len(segments):
-        verify_frame_idx = int(float(segments[verify_skip_segments].get("start_time_s", 0.0)) * segment_fps)
-    elif verify_skip_segments >= len(segments) and verify_skip_segments > 0:
-        _log(
-            "[chevron] run: verify.skip_match_segments is out of range; "
-            f"requested={verify_skip_segments}, segments={len(segments)}. Falling back to frame 0."
-        )
-
-    _log("[chevron] run: verify stage")
-    _write_run_status(
-        run_status_path,
-        "verify_starting",
-        {
-            "video": pipeline_video,
-            "config": args.config,
-            "frame_idx": verify_frame_idx,
-            "skip_match_segments": verify_skip_segments,
-        },
-    )
-    verify_namespace = argparse.Namespace(
-        video=pipeline_video,
-        config=args.config,
-        out=str(verify_out),
-        frame=verify_frame_idx,
-    )
-    cmd_verify(verify_namespace)
-    verified = read_json(verify_out)
-    correspondences = verified.get("correspondences", {})
-    _write_run_status(run_status_path, "verify_complete", {"video": pipeline_video, "config": args.config, "out": str(verify_out)})
-
-    _log("[chevron] run: calibrate stage")
-    _write_run_status(run_status_path, "calibrate_starting", {"out": str(calib_out)})
-    namespace = argparse.Namespace(video=pipeline_video, config=args.config, out=calib_out, correspondences=correspondences)
-    cmd_calibrate(namespace)
-    calib = read_json(calib_path)
-    _write_run_status(run_status_path, "calibrate_complete", {"calib": str(calib_path)})
-
-    seg = segments
     _log("[chevron] run: raw match export stage")
     raw_out = work / "matches_raw"
     _write_run_status(run_status_path, "raw_export_starting", {"matches_raw_out": str(raw_out)})
-    raw_outputs = _export_raw_matches(proxy, seg, raw_out, output_fps=output_fps)
+    raw_outputs = _export_raw_matches(proxy, segments, raw_out, output_fps=output_fps)
     _write_run_status(run_status_path, "raw_export_complete", {"clips": len(raw_outputs), "matches_raw_out": str(raw_out)})
+
+    proxy_path = Path(proxy)
+    if proxy_path.exists():
+        proxy_path.unlink()
+        _log(f"[chevron] run: removed ingest proxy after raw export -> {proxy_path}")
+    _write_run_status(run_status_path, "ingest_proxy_deleted", {"proxy": str(proxy_path)})
 
     _log("[chevron] run: render stage")
     from .render.pipeline import render_matches
 
-    _write_run_status(run_status_path, "render_starting", {"matches_out": str(work / "matches"), "video": pipeline_video})
-    def _on_render_progress(details: dict) -> None:
-        _log(_format_render_progress(details))
-        _write_run_status(run_status_path, "render_running", details)
+    total_clips = len(raw_outputs)
+    for clip_index, clip_path in enumerate(raw_outputs, start=1):
+        clip = Path(clip_path)
+        clip_duration_s = _probe_video_duration_s(clip)
+        if clip_duration_s <= 0.0:
+            raise RuntimeError(f"Raw match clip has non-positive duration: {clip}")
 
-    render_matches(
-        pipeline_video,
-        seg,
-        calib,
-        cfg,
-        work / "matches",
-        output_fps=output_fps,
-        progress_interval_s=cfg.get("monitoring", {}).get("render_progress_interval_s", 5.0),
-        progress_callback=_on_render_progress,
-    )
+        clip_workdir = ensure_dir(workdir / f"match_{clip_index:03d}")
+        clip_verify_out = clip_workdir / "verify_correspondences.json"
+        clip_calib_out = ensure_dir(clip_workdir / "calib")
+        clip_calib_path = clip_calib_out / "calib.json"
+        clip_render_out = ensure_dir(work / "matches" / f"match_{clip_index:03d}")
+
+        _log(f"[chevron] run: verify stage clip={clip_index}/{total_clips}")
+        _write_run_status(
+            run_status_path,
+            "verify_starting",
+            {
+                "clip_index": clip_index,
+                "clip_total": total_clips,
+                "video": str(clip),
+                "config": args.config,
+                "frame_idx": 0,
+            },
+        )
+        verify_namespace = argparse.Namespace(
+            video=str(clip),
+            config=args.config,
+            out=str(clip_verify_out),
+            frame=0,
+        )
+        cmd_verify(verify_namespace)
+        verified = read_json(clip_verify_out)
+        correspondences = verified.get("correspondences", {})
+        _write_run_status(
+            run_status_path,
+            "verify_complete",
+            {"clip_index": clip_index, "clip_total": total_clips, "video": str(clip), "config": args.config, "out": str(clip_verify_out)},
+        )
+
+        _log(f"[chevron] run: calibrate stage clip={clip_index}/{total_clips}")
+        _write_run_status(
+            run_status_path,
+            "calibrate_starting",
+            {"clip_index": clip_index, "clip_total": total_clips, "out": str(clip_calib_out)},
+        )
+        namespace = argparse.Namespace(video=str(clip), config=args.config, out=clip_calib_out, correspondences=correspondences)
+        cmd_calibrate(namespace)
+        calib = read_json(clip_calib_path)
+        _write_run_status(
+            run_status_path,
+            "calibrate_complete",
+            {"clip_index": clip_index, "clip_total": total_clips, "calib": str(clip_calib_path)},
+        )
+
+        _write_run_status(
+            run_status_path,
+            "render_starting",
+            {"clip_index": clip_index, "clip_total": total_clips, "matches_out": str(clip_render_out), "video": str(clip)},
+        )
+
+        def _on_render_progress(details: dict, *, _clip_index: int = clip_index) -> None:
+            details_with_clip = {**details, "clip_index": _clip_index, "clip_total": total_clips}
+            _log(_format_render_progress(details_with_clip))
+            _write_run_status(run_status_path, "render_running", details_with_clip)
+
+        render_matches(
+            str(clip),
+            [{"start_time_s": 0.0, "end_time_s": clip_duration_s}],
+            calib,
+            cfg,
+            clip_render_out,
+            output_fps=output_fps,
+            progress_interval_s=cfg.get("monitoring", {}).get("render_progress_interval_s", 5.0),
+            progress_callback=_on_render_progress,
+        )
+
     _write_run_status(run_status_path, "render_complete")
     _log("[chevron] run: complete")
 
