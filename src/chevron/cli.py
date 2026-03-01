@@ -159,37 +159,38 @@ def _resolve_output_fps(cfg: dict, cli_fps: int) -> int:
 
 
 def cmd_detect(args):
-    """Step-2 detection scaffolding for CV tracking development."""
+    from .detect import DetectionSettings, detect_fuel
 
-    out = ensure_dir(args.out)
-    ref_dir = ensure_dir(out / "reference")
-    reference_path = ref_dir / "fuel_element_reference.png"
+    detect_cfg = {}
+    if args.config:
+        cfg = load_config(args.config)
+        detect_cfg = cfg.get("detect", {}) or {}
 
-    if args.reference:
-        src = Path(args.reference)
-        if not src.exists():
-            raise FileNotFoundError(f"Reference image not found: {src}")
-        reference_path.write_bytes(src.read_bytes())
-        _log(f"[chevron] detect: stored reference image -> {reference_path}")
-    elif not reference_path.exists():
-        _log(
-            "[chevron] detect: no reference image provided; "
-            "run again with --reference /path/to/fuel_element.png"
-        )
+    def _opt(name: str, cli_value):
+        return detect_cfg.get(name, cli_value)
 
-    state = {
-        "stage": "step2_detect_bootstrap",
-        "reference_image": str(reference_path) if reference_path.exists() else None,
-        "notes": {
-            "goal": "Track fuel elements across pseudo-top-down views",
-            "distortion_tolerance": (
-                "Use feature/descriptor or augmentation-aware matching to tolerate "
-                "homography-induced stretching"
-            ),
-        },
-    }
-    write_json(out / "detect_state.json", state)
-    _log(f"[chevron] detect: initialized state -> {out / 'detect_state.json'}")
+    _log("[chevron] detect: starting")
+    settings = DetectionSettings(
+        threshold=float(_opt("threshold", args.threshold)),
+        scale_min=float(_opt("scale_min", args.scale_min)),
+        scale_max=float(_opt("scale_max", args.scale_max)),
+        scale_steps=int(_opt("scale_steps", args.scale_steps)),
+        nms_iou_threshold=float(_opt("nms_iou_threshold", args.nms_iou_threshold)),
+        max_detections_per_frame=int(_opt("max_detections_per_frame", args.max_detections_per_frame)),
+        max_candidates_per_scale=int(_opt("max_candidates_per_scale", args.max_candidates_per_scale)),
+    )
+    summary = detect_fuel(
+        video_dir=args.video_dir,
+        reference_image=args.reference,
+        out_dir=args.out,
+        settings=settings,
+        show_preview=bool(args.preview),
+        combine=bool(args.combine),
+    )
+    _log(f"[chevron] detect: outputs -> {summary.get('outputs', {})}")
+    if summary.get("combined_outputs"):
+        _log(f"[chevron] detect: combined -> {summary['combined_outputs']}")
+    _log("[chevron] detect: complete")
 
 
 
@@ -515,8 +516,19 @@ def build_parser():
     s.set_defaults(func=cmd_run)
 
     s = sub.add_parser("detect")
+    s.add_argument("--video-dir", required=True)
     s.add_argument("--out", required=True)
-    s.add_argument("--reference", required=False)
+    s.add_argument("--reference", required=True)
+    s.add_argument("--config", required=False)
+    s.add_argument("--threshold", type=float, default=0.58)
+    s.add_argument("--scale-min", type=float, default=0.75)
+    s.add_argument("--scale-max", type=float, default=1.25)
+    s.add_argument("--scale-steps", type=int, default=12)
+    s.add_argument("--nms-iou-threshold", type=float, default=0.25)
+    s.add_argument("--max-detections-per-frame", type=int, default=300)
+    s.add_argument("--max-candidates-per-scale", type=int, default=400)
+    s.add_argument("--combine", action="store_true")
+    s.add_argument("--preview", action="store_true")
     s.set_defaults(func=cmd_detect)
     return p
 

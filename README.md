@@ -86,7 +86,7 @@ What the local verifier does:
 - Click an **image point** in the crop, then click its matching **field point** in the field canvas.
 - Keyboard controls: `n`/`Space`/`Enter` (advance to next view), `u` (undo last pair), `c` (clear current view), `q` (save + quit), `Esc` (cancel).
 - On-screen status shows `pairs=<count>` and `pending=yes/no`; a pair is only committed when you click an image point then its matching field point. The render preview updates continuously using the current point pairs.
-- Verify always proceeds through all configured views sequentially (`top` -> `bottom_left` -> `bottom_right`) each run.
+- Verify now calibrates only the main `top` view each run.
 - Optional config: `verify.skip_match_segments` to start verify from a later detected match segment (`0` = first segment, `1` = skip segment 1/start at segment 2).
 - Saves correspondences JSON to the path given by `--out`.
 
@@ -120,7 +120,7 @@ Raw extracted source clips before top-down rendering:
 - `chevron run` defaults to `--resume`, so if `workdir/ingest_meta.json` + proxy already exist, ingest is reused instead of re-running.
 - On resumed runs, already-rendered match outputs are detected (`match_<n>/topdown.mp4` + `match_meta.json`) and skipped; only missing matches are rendered.
 - CLI logs now include both UTC timestamps and elapsed runtime for easier step-by-step time estimation.
-- Added `chevron detect --out <dir> [--reference <fuel_element_image>]` as a step-2 bootstrap command to store a fuel-element reference image and initialize CV-tracking state metadata.
+- Added `chevron detect --video-dir <mp4_folder> --reference <fuel_element_image> --out <dir> [--config detect.yml] [--combine]` for dense multi-match detection tuned via `detect.*` config keys; outputs are named per input stem (e.g., `match_002_map.png`, `match_002_map.gif`) with optional combined outputs (`match_combined_map.png`, `match_combined_map.gif`) plus `tracked_counts.json`.
 Debug artifacts:
 - segment score frames in `segment_debug/`
 - split layout preview image

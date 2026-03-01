@@ -9,7 +9,7 @@ from chevron.split.layout import get_layout
 from chevron.utils.config import load_config
 from chevron.utils.io import read_json, write_json
 
-VIEW_ORDER = ["top", "bottom_right", "bottom_left"]
+VIEW_ORDER = ["top"]
 
 
 def _draw_points(img: np.ndarray, points: list[list[float]], color: tuple[int, int, int], prefix: str) -> np.ndarray:

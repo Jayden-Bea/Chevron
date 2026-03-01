@@ -19,19 +19,9 @@ def test_render_matches_emits_progress_events(tmp_path):
         "canvas": {"width_px": 16, "height_px": 16},
         "homographies": {
             "top": [[0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 1.0]],
-            "bottom_left": [[0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 1.0]],
-            "bottom_right": [[0.5, 0.0, 0.0], [0.0, 0.5, 0.0], [0.0, 0.0, 1.0]],
         },
     }
-    cfg = {
-        "split": {
-            "crops": {
-                "top": [0, 0, 16, 16],
-                "bottom_left": [0, 16, 16, 16],
-                "bottom_right": [16, 16, 16, 16],
-            }
-        }
-    }
+    cfg = {"split": {"crops": {"top": [0, 0, 32, 32]}}}
 
     events = []
     outputs = render_matches(
@@ -47,8 +37,8 @@ def test_render_matches_emits_progress_events(tmp_path):
     assert len(outputs) == 1
     match_dir = tmp_path / "matches" / "match_001"
     assert (match_dir / "topdown_top.mp4").exists()
-    assert (match_dir / "topdown_bottom_left.mp4").exists()
-    assert (match_dir / "topdown_bottom_right.mp4").exists()
+    assert not (match_dir / "topdown_bottom_left.mp4").exists()
+    assert not (match_dir / "topdown_bottom_right.mp4").exists()
     assert (match_dir / "topdown.mp4").exists()
     assert any(evt.get("event") == "match_start" for evt in events)
     assert any(evt.get("event") == "match_progress" for evt in events)
@@ -67,8 +57,6 @@ def test_render_matches_skips_existing_output(tmp_path):
     existing_dir.mkdir(parents=True)
     (existing_dir / "topdown.mp4").write_bytes(b"already there")
     (existing_dir / "topdown_top.mp4").write_bytes(b"already there")
-    (existing_dir / "topdown_bottom_left.mp4").write_bytes(b"already there")
-    (existing_dir / "topdown_bottom_right.mp4").write_bytes(b"already there")
     (existing_dir / "match_meta.json").write_text("{}", encoding="utf-8")
 
     segments = [{"start_time_s": 0.0, "end_time_s": 0.5}]
@@ -77,19 +65,9 @@ def test_render_matches_skips_existing_output(tmp_path):
         "canvas": {"width_px": 16, "height_px": 16},
         "homographies": {
             "top": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            "bottom_left": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            "bottom_right": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         },
     }
-    cfg = {
-        "split": {
-            "crops": {
-                "top": [0, 0, 16, 16],
-                "bottom_left": [0, 16, 16, 16],
-                "bottom_right": [16, 16, 16, 16],
-            }
-        }
-    }
+    cfg = {"split": {"crops": {"top": [0, 0, 32, 32]}}}
 
     events = []
     outputs = render_matches(
@@ -119,19 +97,9 @@ def test_render_matches_includes_output_manifest(tmp_path):
         "canvas": {"width_px": 16, "height_px": 16},
         "homographies": {
             "top": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            "bottom_left": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
-            "bottom_right": [[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         },
     }
-    cfg = {
-        "split": {
-            "crops": {
-                "top": [0, 0, 16, 16],
-                "bottom_left": [0, 16, 16, 16],
-                "bottom_right": [16, 16, 16, 16],
-            }
-        }
-    }
+    cfg = {"split": {"crops": {"top": [0, 0, 32, 32]}}}
 
     render_matches(str(video_path), segments, calib, cfg, tmp_path / "matches")
 
@@ -141,6 +109,4 @@ def test_render_matches_includes_output_manifest(tmp_path):
     assert payload["outputs"] == {
         "combined": "topdown.mp4",
         "top": "topdown_top.mp4",
-        "bottom_left": "topdown_bottom_left.mp4",
-        "bottom_right": "topdown_bottom_right.mp4",
     }
