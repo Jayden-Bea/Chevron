@@ -7,6 +7,7 @@ from chevron.ingest import (
     _download_youtube,
     _is_retryable_ytdlp_error,
     _normalize_youtube_cookie_header,
+    _shuffle_youtube_strategies,
     _youtube_download_strategies,
 )
 
@@ -45,18 +46,15 @@ def test_download_youtube_retries_across_clients(monkeypatch, tmp_path: Path):
     download_result = _download_youtube("https://youtube.com/watch?v=abc123", tmp_path, logger=logs.append)
 
     assert download_result.source_path.name == "abc123.mp4"
-    assert download_result.successful_strategy == "android_creator"
-    assert download_result.successful_strategy_args == ["--extractor-args", "youtube:player_client=android_creator"]
     assert len(calls) == 3
     assert "--extractor-args" not in calls[0]
-    assert any("youtube:player_client=android" in part for part in calls[1])
-    assert any("youtube:player_client=android_creator" in part for part in calls[2])
     assert download_result.attempts[0]["strategy"] == "default"
+    assert download_result.successful_strategy == download_result.attempts[-1]["strategy"]
     assert download_result.attempts[-1]["status"] == "success"
     assert "Attempting to ingest youtube video Sample title with the following settings:\n[]" in logs[0]
     assert "Ingest \x1b[31mfailed\x1b[0m." in logs[1]
     assert "Ingest \x1b[32msucceeded\x1b[0m." in logs[-2]
-    assert "Saving device settings as: ['--extractor-args', 'youtube:player_client=android_creator']" in logs[-1]
+    assert "Saving device settings as:" in logs[-1]
 
 
 def test_download_youtube_raises_on_non_retryable_error(monkeypatch, tmp_path: Path):
@@ -101,13 +99,27 @@ def test_download_youtube_strategies_are_exhaustive_enough_for_fallbacks():
     names = [strategy["name"] for strategy in strategies]
 
     assert names[0] == "default"
+    assert "default_modern_ua" in names
     assert "android" in names
+    assert "android_modern_ua" in names
     assert "web" in names
     assert "ios" in names
     assert "tv_embedded" in names
     assert "android_ipv4" in names
     assert "web_relaxed_network" in names
 
+
+
+
+def test_shuffle_youtube_strategies_is_deterministic_per_url():
+    strategies = _youtube_download_strategies()
+    order_a = [entry["name"] for entry in _shuffle_youtube_strategies("https://youtube.com/watch?v=aaa", strategies)]
+    order_b = [entry["name"] for entry in _shuffle_youtube_strategies("https://youtube.com/watch?v=aaa", strategies)]
+    order_c = [entry["name"] for entry in _shuffle_youtube_strategies("https://youtube.com/watch?v=bbb", strategies)]
+
+    assert order_a == order_b
+    assert order_a[0] == "default"
+    assert order_a != order_c
 
 def test_download_youtube_strategies_include_browser_cookie_fallbacks(monkeypatch):
     monkeypatch.setattr("chevron.ingest.which", lambda command: "/usr/bin/fake" if command in {"firefox", "chromium"} else None)
@@ -214,7 +226,7 @@ def test_download_youtube_falls_back_to_automatic_strategies_when_provided_cooki
         youtube_cookie_header="SID=fake",
     )
 
-    assert result.successful_strategy == "android"
+    assert result.successful_strategy != "manual_cookie_header"
     assert result.attempts[0]["strategy"] == "manual_cookie_header"
     assert result.attempts[0]["status"] == "failed"
 

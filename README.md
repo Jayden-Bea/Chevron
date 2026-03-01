@@ -81,6 +81,9 @@ chevron run --url "https://youtube.com/watch?v=..." --config configs/example_con
 
 If YouTube blocks anonymous download attempts (403 / "sign in to confirm you're not a bot"), Chevron also supports a user-provided Cookie header fallback directly via `--youtube-cookie` (or env var `CHEVRON_YOUTUBE_COOKIE`).
 
+
+Chevron automatically shuffles YouTube client and user-agent fallback strategies during ingest, so most users should not need to pass low-level yt-dlp flags manually.
+
 1. Sign in to YouTube in your browser.
 2. Open browser DevTools → **Network** tab and reload `youtube.com`.
 3. Try to open a request that shows a `Cookie` header in **Request Headers**, then copy just the value.

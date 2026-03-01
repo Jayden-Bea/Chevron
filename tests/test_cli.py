@@ -563,3 +563,5 @@ def test_cmd_detect_uses_config_overrides(monkeypatch, tmp_path):
     assert captured["settings"].scale_steps == 3
     assert captured["settings"].scale_min == 0.75
     assert captured["combine"] is False
+
+
