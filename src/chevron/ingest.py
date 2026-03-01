@@ -18,7 +18,7 @@ _GREEN = "\x1b[32m"
 _RESET = "\x1b[0m"
 _DEFAULT_YOUTUBE_USER_AGENT = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/137.0.0.0 Safari/537.36"
 
-_YTDLP_MIN_VERSION = "2026.02.28"
+_YTDLP_MIN_VERSION = "2026.02.21"
 
 
 def _parse_yt_dlp_version(version_text: str) -> tuple[int, int, int] | None:
