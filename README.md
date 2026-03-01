@@ -57,6 +57,13 @@ For local files:
 chevron run --video /path/to/vod.mp4 --config configs/example_config.yml --out out_dir/
 ```
 
+`chevron run` now executes in this order:
+1. Download/transcode ingest proxy.
+2. Segment detection over the pipeline video.
+3. Export numbered `matches_raw/match_<n>.mp4` clips from the detected segments.
+4. Delete the large ingest proxy (`workdir/proxy.mp4`) to save disk space.
+5. Run verify → calibrate → render iteratively on each raw match clip.
+
 
 ### YouTube auth fallback (clear input instructions)
 
@@ -117,11 +124,8 @@ Notes:
 
 ```bash
 chevron ingest --url <vod_url> --out workdir/
-# optional: after ingest, open a scrubbable OpenCV viewer and drag-select a match capture area
-chevron ingest --url <vod_url> --out workdir/ --select-capture-area
 chevron segment --video workdir/proxy.mp4 --config configs/example_config.yml --out workdir/segments.json
 chevron split --video workdir/proxy.mp4 --segments workdir/segments.json --config configs/example_config.yml --out workdir/splits/
-chevron calibrate --video workdir/proxy.mp4 --config configs/example_config.yml --out workdir/calib/
 chevron render --video workdir/proxy.mp4 --segments workdir/segments.json --calib workdir/calib/calib.json --config configs/example_config.yml --out out_dir/
 ```
 
@@ -129,7 +133,7 @@ Capture-area selector controls (`--select-capture-area`):
 - Scrub the frame trackbar to find a representative frame.
 - Press `b` to drag a rectangle.
 - Press `Enter` or `s` to save to `workdir/capture_area.json` (or `--capture-area-out`).
-- During `chevron run`, if `workdir/capture_area.json` exists, segmentation/verify/calibrate/render use a cropped proxy (`workdir/proxy_cropped.mp4`), while `matches_raw` export still uses the full-frame ingest proxy.
+- During `chevron run`, if `workdir/capture_area.json` exists, segmentation uses a cropped proxy (`workdir/proxy_cropped.mp4`) while raw export still uses the full-frame ingest proxy. Verify/calibrate/render then run against per-match clips in `matches_raw/`.
 
 
 ## Verify config (local OpenCV UI)
@@ -140,20 +144,12 @@ Use the local verifier to define/adjust calibration correspondences before calib
 chevron verify --video workdir/proxy.mp4 --config configs/my_event.yml --out workdir/verify_correspondences.json
 ```
 
-You can also set in config:
-
-```yaml
-verify:
-  skip_match_segments: 1  # skip first detected segment before verify opens
-```
-
 What the local verifier does:
 - Opens one crop window, one field-canvas window, and one live single-frame render preview window while you edit correspondences.
 - Click an **image point** in the crop, then click its matching **field point** in the field canvas.
 - Keyboard controls: `n`/`Space`/`Enter` (advance to next view), `u` (undo last pair), `c` (clear current view), `q` (save + quit), `Esc` (cancel).
 - On-screen status shows `pairs=<count>` and `pending=yes/no`; a pair is only committed when you click an image point then its matching field point. The render preview updates continuously using the current point pairs.
 - Verify now calibrates only the main `top` view each run.
-- Optional config: `verify.skip_match_segments` to start verify from a later detected match segment (`0` = first segment, `1` = skip segment 1/start at segment 2).
 - Saves correspondences JSON to the path given by `--out`.
 
 ### Quadrilateral vs rectangle
@@ -180,8 +176,8 @@ Raw extracted source clips before top-down rendering:
 - `matches_raw/match_<n>.mp4`
 - `matches_raw/matches_raw.json`
 
-- `chevron run` writes progress checkpoints to `out_dir/workdir/run_status.json` (ingest/segment/verify/calibrate/render stage updates, including per-match render progress).
-- After segmentation, `chevron run` automatically launches a local OpenCV verifier so users can edit image/field correspondences before calibration and render.
+- `chevron run` writes progress checkpoints to `out_dir/workdir/run_status.json` (ingest/segment/raw-export/proxy-delete/verify/calibrate/render stage updates, including per-clip render progress).
+- After segmentation and raw-export, `chevron run` launches a local OpenCV verifier per extracted match clip so users only calibrate on in-match frames.
 - Optional monitoring knobs in config: `monitoring.segment_progress_interval_s` and `monitoring.render_progress_interval_s` (seconds).
 - `chevron run` defaults to `--resume`, so if `workdir/ingest_meta.json` + proxy already exist, ingest is reused instead of re-running.
 - On resumed runs, already-rendered match outputs are detected (`match_<n>/topdown.mp4` + `match_meta.json`) and skipped; only missing matches are rendered.
