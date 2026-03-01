@@ -110,7 +110,7 @@ def run_local_verify(video: str, config: str, out_json: str | Path, frame_idx: i
         }
 
     print("[chevron] verify(local): click IMAGE point in crop window, then matching FIELD point in field window.")
-    print("[chevron] verify(local): keys -> n/space(next view), u(undo pair), c(clear view), q(save+next), esc(cancel)")
+    print("[chevron] verify(local): keys -> n/space(next view), s(skip view), u(undo pair), c(clear view), q(save+next), esc(cancel)")
 
     views_to_verify = [view for view in VIEW_ORDER if view in layout]
     if not views_to_verify:
@@ -177,6 +177,9 @@ def run_local_verify(video: str, config: str, out_json: str | Path, frame_idx: i
 
             key = cv2.waitKey(20) & 0xFF
             if key in (ord("n"), 32, 13):
+                break
+            if key == ord("s"):
+                print(f"[chevron] verify(local): skipping view -> {view}")
                 break
             if key == ord("u"):
                 if image_points and field_points:
