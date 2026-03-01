@@ -18,12 +18,12 @@ from chevron.ingest import (
 def mock_minimum_ytdlp_version(monkeypatch):
     monkeypatch.setattr(
         "chevron.ingest._ensure_yt_dlp_minimum_version",
-        lambda minimum_version="2026.02.28": ("2026.02.28", (2026, 2, 28)),
+        lambda minimum_version="2026.02.21": ("2026.02.21", (2026, 2, 21)),
     )
 
 
 def test_parse_yt_dlp_version_handles_stable_and_none():
-    assert _parse_yt_dlp_version("2026.02.28") == (2026, 2, 28)
+    assert _parse_yt_dlp_version("2026.02.21") == (2026, 2, 21)
     assert _parse_yt_dlp_version("stable@2026.03.01 from yt-dlp/yt-dlp") == (2026, 3, 1)
     assert _parse_yt_dlp_version("nightly") is None
 
@@ -36,8 +36,8 @@ def test_ensure_yt_dlp_minimum_version_rejects_older_build(monkeypatch):
 
     monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: Completed())
 
-    with pytest.raises(RuntimeError, match="require >= 2026.02.28"):
-        _ensure_yt_dlp_minimum_version("2026.02.28")
+    with pytest.raises(RuntimeError, match="require >= 2026.02.21"):
+        _ensure_yt_dlp_minimum_version("2026.02.21")
 
 
 
@@ -80,9 +80,11 @@ def test_download_youtube_retries_across_clients(monkeypatch, tmp_path: Path):
     assert download_result.attempts[0]["strategy"] == "default"
     assert download_result.successful_strategy == download_result.attempts[-1]["strategy"]
     assert download_result.attempts[-1]["status"] == "success"
-    assert "Using yt-dlp version 2026.02.28" in logs[0]
-    assert "Attempting YouTube ingest strategy=default video='Sample title' args=[]" in logs[1]
-    assert "Ingest \x1b[31mfailed\x1b[0m strategy=default returncode=1." in logs[2]
+    assert "Using yt-dlp version 2026.02.21" in logs[0]
+    assert any("Resolved video metadata; yt-dlp will now attempt to fetch media bytes." in entry for entry in logs)
+    assert any("yt-dlp accepted the request and is now downloading the media stream." in entry for entry in logs)
+    assert any("Attempting YouTube ingest strategy=default video='Sample title' args=[]" in entry for entry in logs)
+    assert any("Ingest \x1b[31mfailed\x1b[0m strategy=default returncode=1." in entry for entry in logs)
     assert "Ingest \x1b[32msucceeded\x1b[0m." in logs[-2]
     assert "Saving device settings as:" in logs[-1]
 
