@@ -285,6 +285,19 @@ def _with_user_agent(name: str, args: list[str]) -> dict[str, str | list[str]]:
     return {"name": name, "args": [*args, "--user-agent", _DEFAULT_YOUTUBE_USER_AGENT]}
 
 
+def _with_aria2c(name: str, args: list[str]) -> dict[str, str | list[str]]:
+    return {
+        "name": name,
+        "args": [
+            *args,
+            "--downloader",
+            "aria2c",
+            "--downloader-args",
+            "aria2c:-x16 -s16 -k1M --min-split-size=1M --summary-interval=0",
+        ],
+    }
+
+
 def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
     # Ordered from least invasive to most aggressive compatibility workarounds.
     strategies: list[dict[str, str | list[str]]] = [
@@ -355,6 +368,14 @@ def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
                 ],
             }
         )
+
+    if which("aria2c"):
+        strategies = [
+            strategies[0],
+            _with_aria2c("android_aria2c", ["--extractor-args", "youtube:player_client=android"]),
+            _with_aria2c("default_aria2c", []),
+            *strategies[1:],
+        ]
 
     return strategies
 

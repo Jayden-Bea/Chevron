@@ -153,6 +153,13 @@ def test_download_youtube_strategies_are_exhaustive_enough_for_fallbacks():
     assert "web_relaxed_network" in names
 
 
+def test_download_youtube_strategies_include_aria2c_when_available(monkeypatch):
+    monkeypatch.setattr("chevron.ingest.which", lambda command: "/usr/bin/fake" if command == "aria2c" else None)
+
+    strategies = _youtube_download_strategies()
+    names = [strategy["name"] for strategy in strategies]
+
+    assert names[:3] == ["android", "android_aria2c", "default_aria2c"]
 
 
 def test_shuffle_youtube_strategies_is_deterministic_per_url():
