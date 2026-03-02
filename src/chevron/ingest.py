@@ -25,15 +25,17 @@ _YTDLP_MIN_VERSION = "2026.02.21"
 _YTDLP_PREFERRED_FORMAT_ARGS = [
     "-f",
     (
-        "bv*[height<=720]+ba/"
         "b[height<=720][ext=mp4]/"
+        "bv*[height<=720]+ba/"
         "best[height<=720]/"
         "best"
     ),
+    "--throttled-rate",
+    "2M",
     "--http-chunk-size",
-    "1M",
+    "10M",
     "--concurrent-fragments",
-    "8",
+    "16",
     "--merge-output-format",
     "mp4",
 ]
