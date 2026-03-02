@@ -137,6 +137,7 @@ _YTDLP_SIZE_RE = re.compile(r"of\s+~?\s*([0-9]+(?:\.[0-9]+)?)([KMGTP]?i?B)", re.
 _YTDLP_DESTINATION_RE = re.compile(r"\[download\]\s+Destination:\s+(.+)")
 _YTDLP_HEARTBEAT_INTERVAL_S = 2.0
 _YTDLP_STDOUT_POLL_TIMEOUT_S = 0.5
+_YTDLP_STALL_LOG_THRESHOLD_S = 8.0
 
 
 def _parse_size_to_bytes(value: str, unit: str) -> int | None:
@@ -182,6 +183,12 @@ def _extract_estimated_total_bytes(progress_line: str) -> int | None:
     return _parse_size_to_bytes(match.group(1), match.group(2))
 
 
+def _format_download_rate(bytes_per_second: float | None) -> str:
+    if bytes_per_second is None or bytes_per_second <= 0:
+        return "unknown"
+    return f"{_human_readable_bytes(int(bytes_per_second))}/s"
+
+
 def _resolve_partial_download_path(destination: Path) -> Path:
     if destination.suffix == ".part":
         return destination
@@ -203,6 +210,9 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
     part_path: Path | None = None
     saw_fragment_progress = False
     last_activity_at = time.monotonic()
+    first_progress_at: float | None = None
+    last_part_size: int | None = None
+    last_part_size_at: float | None = None
 
     while True:
         ready, _, _ = select.select([process.stdout], [], [], _YTDLP_STDOUT_POLL_TIMEOUT_S)
@@ -231,15 +241,26 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
                         logger(f"yt-dlp fragment status: {stripped}")
 
                     if part_path and part_path.exists():
+                        now = time.monotonic()
                         part_size = part_path.stat().st_size
+                        if first_progress_at is None:
+                            first_progress_at = now
+                        if part_size != last_part_size:
+                            last_part_size = part_size
+                            last_part_size_at = now
+
                         pct_text = ""
+                        rate_text = ""
                         if estimated_total_bytes:
                             pct = min((part_size / estimated_total_bytes) * 100, 100)
                             pct_text = f" ({pct:.1f}% of estimate)"
+                        if first_progress_at and now > first_progress_at:
+                            avg_bps = part_size / (now - first_progress_at)
+                            rate_text = f", avg_rate={_format_download_rate(avg_bps)}"
                         logger(
                             "yt-dlp progress: "
                             f"part={_human_readable_bytes(part_size)}"
-                            f" / estimate={_human_readable_bytes(estimated_total_bytes)}{pct_text}"
+                            f" / estimate={_human_readable_bytes(estimated_total_bytes)}{pct_text}{rate_text}"
                         )
                     else:
                         logger(f"yt-dlp progress: {stripped}")
@@ -254,6 +275,7 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
             break
 
         if logger and time.monotonic() - last_activity_at >= _YTDLP_HEARTBEAT_INTERVAL_S:
+            now = time.monotonic()
             heartbeat = "yt-dlp heartbeat: download process still running"
             if part_path and part_path.exists():
                 part_size = part_path.stat().st_size
@@ -264,8 +286,17 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
                         f", estimate={_human_readable_bytes(estimated_total_bytes)}"
                         f", progress~{pct:.1f}%"
                     )
+                if first_progress_at and now > first_progress_at:
+                    heartbeat += f", avg_rate={_format_download_rate(part_size / (now - first_progress_at))}"
+                if last_part_size is not None and part_size == last_part_size and last_part_size_at:
+                    stalled_for = now - last_part_size_at
+                    if stalled_for >= _YTDLP_STALL_LOG_THRESHOLD_S:
+                        heartbeat += f", stalled_for~{stalled_for:.0f}s"
+                elif part_size != last_part_size:
+                    last_part_size = part_size
+                    last_part_size_at = now
             logger(heartbeat)
-            last_activity_at = time.monotonic()
+            last_activity_at = now
 
     return_code = process.wait()
     if return_code != 0:
