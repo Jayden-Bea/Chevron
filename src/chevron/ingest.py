@@ -25,16 +25,17 @@ _YTDLP_MIN_VERSION = "2026.02.21"
 _YTDLP_PREFERRED_FORMAT_ARGS = [
     "-f",
     (
-        "bv*[height<=720][vcodec~='^(avc1|h264)'][ext=mp4]+ba[ext=m4a]/"
-        "b[height<=720][vcodec~='^(avc1|h264)'][ext=mp4]/"
-        "bv*[height<=720][vcodec~='^(avc1|h264)']+ba/"
-        "b[height<=720][vcodec~='^(avc1|h264)']/"
-        "bv*[height<=720][ext=mp4]+ba[ext=m4a]/"
         "b[height<=720][ext=mp4]/"
-        "best[height<=720]"
+        "bv*[height<=720]+ba/"
+        "best[height<=720]/"
+        "best"
     ),
+    "--throttled-rate",
+    "2M",
+    "--http-chunk-size",
+    "10M",
     "--concurrent-fragments",
-    "8",
+    "16",
     "--merge-output-format",
     "mp4",
 ]
@@ -673,11 +674,15 @@ def ingest(
             youtube_cookie_header=youtube_cookie_header,
             youtube_cookies_from_browser=youtube_cookies_from_browser,
             youtube_cookies_file=youtube_cookies_file,
-            output_path=proxy_path,
             start_at=start_at,
             end_at=end_at,
         )
         source_path = download_result.source_path
+        if source_path.resolve() != proxy_path.resolve():
+            if source_path.suffix.lower() == ".mp4":
+                shutil.copy2(source_path, proxy_path)
+            else:
+                normalize_video(source_path, proxy_path, fps=fps)
     elif video:
         src = Path(video)
         source_path = source_dir / src.name
