@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import shutil
 import subprocess
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
@@ -124,6 +126,139 @@ def _resolve_youtube_title(url: str) -> str:
 
     lines = [line.strip() for line in (completed.stdout or "").splitlines() if line.strip()]
     return lines[-1] if lines else url
+
+
+_YTDLP_SIZE_RE = re.compile(r"of\s+~?\s*([0-9]+(?:\.[0-9]+)?)([KMGTP]?i?B)", re.IGNORECASE)
+_YTDLP_DESTINATION_RE = re.compile(r"\[download\]\s+Destination:\s+(.+)")
+
+
+def _parse_size_to_bytes(value: str, unit: str) -> int | None:
+    unit_factors = {
+        "B": 1,
+        "KB": 1000,
+        "MB": 1000**2,
+        "GB": 1000**3,
+        "TB": 1000**4,
+        "PB": 1000**5,
+        "KIB": 1024,
+        "MIB": 1024**2,
+        "GIB": 1024**3,
+        "TIB": 1024**4,
+        "PIB": 1024**5,
+    }
+    factor = unit_factors.get(unit.upper())
+    if factor is None:
+        return None
+
+    try:
+        return int(float(value) * factor)
+    except ValueError:
+        return None
+
+
+def _human_readable_bytes(size_bytes: int | None) -> str:
+    if size_bytes is None:
+        return "unknown"
+    if size_bytes <= 0:
+        return "0 B"
+
+    units = ["B", "KiB", "MiB", "GiB", "TiB"]
+    exponent = min(int(math.log(size_bytes, 1024)), len(units) - 1)
+    value = size_bytes / (1024**exponent)
+    return f"{value:.2f} {units[exponent]}"
+
+
+def _extract_estimated_total_bytes(progress_line: str) -> int | None:
+    match = _YTDLP_SIZE_RE.search(progress_line)
+    if not match:
+        return None
+    return _parse_size_to_bytes(match.group(1), match.group(2))
+
+
+def _resolve_partial_download_path(destination: Path) -> Path:
+    if destination.suffix == ".part":
+        return destination
+    return destination.with_suffix(destination.suffix + ".part")
+
+
+def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | None = None) -> None:
+    process = subprocess.Popen(
+        cmd,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        bufsize=1,
+    )
+    assert process.stdout is not None
+
+    output_lines: list[str] = []
+    estimated_total_bytes: int | None = None
+    destination_path: Path | None = None
+    part_path: Path | None = None
+    last_heartbeat_at = time.monotonic()
+    heartbeat_interval_s = 5.0
+
+    while True:
+        line = process.stdout.readline()
+        if line:
+            stripped = line.strip()
+            output_lines.append(stripped)
+
+            destination_match = _YTDLP_DESTINATION_RE.search(stripped)
+            if destination_match:
+                destination_path = Path(destination_match.group(1).strip())
+                part_path = _resolve_partial_download_path(destination_path)
+                if logger:
+                    logger(f"yt-dlp destination: {destination_path}")
+
+            estimated = _extract_estimated_total_bytes(stripped)
+            if estimated:
+                estimated_total_bytes = estimated
+
+            if logger and stripped.startswith("[download]"):
+                if part_path and part_path.exists():
+                    part_size = part_path.stat().st_size
+                    pct_text = ""
+                    if estimated_total_bytes:
+                        pct = min((part_size / estimated_total_bytes) * 100, 100)
+                        pct_text = f" ({pct:.1f}% of estimate)"
+                    logger(
+                        "yt-dlp progress: "
+                        f"part={_human_readable_bytes(part_size)}"
+                        f" / estimate={_human_readable_bytes(estimated_total_bytes)}{pct_text}"
+                    )
+                else:
+                    logger(f"yt-dlp progress: {stripped}")
+
+            if logger and stripped.startswith("ERROR:"):
+                logger(f"yt-dlp error: {stripped}")
+
+            last_heartbeat_at = time.monotonic()
+            continue
+
+        if process.poll() is not None:
+            break
+
+        if logger and time.monotonic() - last_heartbeat_at >= heartbeat_interval_s:
+            heartbeat = "yt-dlp heartbeat: download process still running"
+            if part_path and part_path.exists():
+                part_size = part_path.stat().st_size
+                heartbeat += f", part={_human_readable_bytes(part_size)}"
+                if estimated_total_bytes:
+                    pct = min((part_size / estimated_total_bytes) * 100, 100)
+                    heartbeat += (
+                        f", estimate={_human_readable_bytes(estimated_total_bytes)}"
+                        f", progress~{pct:.1f}%"
+                    )
+            logger(heartbeat)
+            last_heartbeat_at = time.monotonic()
+
+        time.sleep(0.2)
+
+    return_code = process.wait()
+    if return_code != 0:
+        combined_output = "\n".join(output_lines)
+        raise subprocess.CalledProcessError(return_code, cmd, output=combined_output, stderr="")
 
 
 
@@ -281,6 +416,7 @@ def _attempt_manual_cookie_download(
     cache_dir: Path,
     cookie_header: str,
     download_sections_args: list[str],
+    logger: Callable[[str], None] | None = None,
 ) -> Path:
     cmd = [
         "yt-dlp",
@@ -298,7 +434,7 @@ def _attempt_manual_cookie_download(
         *download_sections_args,
         url,
     ]
-    subprocess.run(cmd, check=True, text=True, capture_output=True)
+    _run_ytdlp_with_progress(cmd, logger=logger)
     return _resolve_downloaded_source(cache_dir, output_tmpl)
 
 
@@ -397,6 +533,7 @@ def _download_youtube(
                 cache_dir,
                 normalized_cookie_header,
                 download_sections_args,
+                logger=logger,
             )
             attempts.append({"strategy": "manual_cookie_header", "status": "success", "returncode": 0})
             if logger:
@@ -442,7 +579,7 @@ def _download_youtube(
             logger("yt-dlp accepted the request and is now downloading the media stream.")
 
         try:
-            subprocess.run(cmd, check=True, text=True, capture_output=True)
+            _run_ytdlp_with_progress(cmd, logger=logger)
             latest = _resolve_downloaded_source(cache_dir, output_tmpl)
             attempts.append({"strategy": strategy["name"], "status": "success", "returncode": 0})
             if logger:
