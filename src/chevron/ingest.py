@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import math
 import re
+import select
 import shutil
 import subprocess
 import time
@@ -24,13 +25,16 @@ _YTDLP_MIN_VERSION = "2026.02.21"
 _YTDLP_PREFERRED_FORMAT_ARGS = [
     "-f",
     (
-        "bv*[vcodec~='^(avc1|h264)'][ext=mp4]+ba[ext=m4a]/"
-        "b[vcodec~='^(avc1|h264)'][ext=mp4]/"
-        "bv*[vcodec~='^(avc1|h264)']+ba/"
-        "b[vcodec~='^(avc1|h264)']/"
-        "bv*[ext=mp4]+ba[ext=m4a]/"
-        "b[ext=mp4]/best"
+        "bv*[height<=720][vcodec~='^(avc1|h264)'][ext=mp4]+ba[ext=m4a]/"
+        "b[height<=720][vcodec~='^(avc1|h264)'][ext=mp4]/"
+        "bv*[height<=720][vcodec~='^(avc1|h264)']+ba/"
+        "b[height<=720][vcodec~='^(avc1|h264)']/"
+        "bv*[height<=720][ext=mp4]+ba[ext=m4a]/"
+        "b[height<=720][ext=mp4]/"
+        "best[height<=720]"
     ),
+    "--concurrent-fragments",
+    "8",
     "--merge-output-format",
     "mp4",
 ]
@@ -130,6 +134,8 @@ def _resolve_youtube_title(url: str) -> str:
 
 _YTDLP_SIZE_RE = re.compile(r"of\s+~?\s*([0-9]+(?:\.[0-9]+)?)([KMGTP]?i?B)", re.IGNORECASE)
 _YTDLP_DESTINATION_RE = re.compile(r"\[download\]\s+Destination:\s+(.+)")
+_YTDLP_HEARTBEAT_INTERVAL_S = 2.0
+_YTDLP_STDOUT_POLL_TIMEOUT_S = 0.5
 
 
 def _parse_size_to_bytes(value: str, unit: str) -> int | None:
@@ -193,53 +199,53 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
 
     output_lines: list[str] = []
     estimated_total_bytes: int | None = None
-    destination_path: Path | None = None
     part_path: Path | None = None
-    last_heartbeat_at = time.monotonic()
-    heartbeat_interval_s = 5.0
+    last_activity_at = time.monotonic()
 
     while True:
-        line = process.stdout.readline()
-        if line:
-            stripped = line.strip()
-            output_lines.append(stripped)
+        ready, _, _ = select.select([process.stdout], [], [], _YTDLP_STDOUT_POLL_TIMEOUT_S)
+        if ready:
+            line = process.stdout.readline()
+            if line:
+                stripped = line.strip()
+                output_lines.append(stripped)
 
-            destination_match = _YTDLP_DESTINATION_RE.search(stripped)
-            if destination_match:
-                destination_path = Path(destination_match.group(1).strip())
-                part_path = _resolve_partial_download_path(destination_path)
-                if logger:
-                    logger(f"yt-dlp destination: {destination_path}")
+                destination_match = _YTDLP_DESTINATION_RE.search(stripped)
+                if destination_match:
+                    destination_path = Path(destination_match.group(1).strip())
+                    part_path = _resolve_partial_download_path(destination_path)
+                    if logger:
+                        logger(f"yt-dlp destination: {destination_path}")
 
-            estimated = _extract_estimated_total_bytes(stripped)
-            if estimated:
-                estimated_total_bytes = estimated
+                estimated = _extract_estimated_total_bytes(stripped)
+                if estimated:
+                    estimated_total_bytes = estimated
 
-            if logger and stripped.startswith("[download]"):
-                if part_path and part_path.exists():
-                    part_size = part_path.stat().st_size
-                    pct_text = ""
-                    if estimated_total_bytes:
-                        pct = min((part_size / estimated_total_bytes) * 100, 100)
-                        pct_text = f" ({pct:.1f}% of estimate)"
-                    logger(
-                        "yt-dlp progress: "
-                        f"part={_human_readable_bytes(part_size)}"
-                        f" / estimate={_human_readable_bytes(estimated_total_bytes)}{pct_text}"
-                    )
-                else:
-                    logger(f"yt-dlp progress: {stripped}")
+                if logger and stripped.startswith("[download]"):
+                    if part_path and part_path.exists():
+                        part_size = part_path.stat().st_size
+                        pct_text = ""
+                        if estimated_total_bytes:
+                            pct = min((part_size / estimated_total_bytes) * 100, 100)
+                            pct_text = f" ({pct:.1f}% of estimate)"
+                        logger(
+                            "yt-dlp progress: "
+                            f"part={_human_readable_bytes(part_size)}"
+                            f" / estimate={_human_readable_bytes(estimated_total_bytes)}{pct_text}"
+                        )
+                    else:
+                        logger(f"yt-dlp progress: {stripped}")
 
-            if logger and stripped.startswith("ERROR:"):
-                logger(f"yt-dlp error: {stripped}")
+                if logger and stripped.startswith("ERROR:"):
+                    logger(f"yt-dlp error: {stripped}")
 
-            last_heartbeat_at = time.monotonic()
-            continue
+                last_activity_at = time.monotonic()
+                continue
 
         if process.poll() is not None:
             break
 
-        if logger and time.monotonic() - last_heartbeat_at >= heartbeat_interval_s:
+        if logger and time.monotonic() - last_activity_at >= _YTDLP_HEARTBEAT_INTERVAL_S:
             heartbeat = "yt-dlp heartbeat: download process still running"
             if part_path and part_path.exists():
                 part_size = part_path.stat().st_size
@@ -251,9 +257,7 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
                         f", progress~{pct:.1f}%"
                     )
             logger(heartbeat)
-            last_heartbeat_at = time.monotonic()
-
-        time.sleep(0.2)
+            last_activity_at = time.monotonic()
 
     return_code = process.wait()
     if return_code != 0:
