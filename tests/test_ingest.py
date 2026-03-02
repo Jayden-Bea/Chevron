@@ -519,17 +519,21 @@ def test_download_youtube_raises_when_success_has_no_output(monkeypatch, tmp_pat
         )
 
 
-def test_ingest_url_uses_downloaded_mp4_as_proxy_without_normalization(monkeypatch, tmp_path: Path):
+def test_ingest_url_copies_downloaded_mp4_to_proxy_without_normalization(monkeypatch, tmp_path: Path):
     out_dir = tmp_path / "workdir"
     proxy_path = out_dir / "proxy.mp4"
+    downloaded_path = out_dir / "source" / "downloaded.mp4"
 
     captured = {}
 
     def fake_download(*args, **kwargs):
         captured["start_at"] = kwargs.get("start_at")
         captured["end_at"] = kwargs.get("end_at")
+        captured["output_path"] = kwargs.get("output_path")
+        downloaded_path.parent.mkdir(parents=True, exist_ok=True)
+        downloaded_path.write_bytes(b"downloaded")
         return YouTubeDownloadResult(
-            source_path=proxy_path,
+            source_path=downloaded_path,
             successful_strategy="default",
             successful_strategy_args=[],
             attempts=[{"strategy": "default", "status": "success", "returncode": 0}],
@@ -551,10 +555,49 @@ def test_ingest_url_uses_downloaded_mp4_as_proxy_without_normalization(monkeypat
         end_at="00:02:30",
     )
 
-    assert meta["source"].endswith("proxy.mp4")
+    assert meta["source"].endswith("downloaded.mp4")
     assert meta["proxy"].endswith("proxy.mp4")
     assert captured["start_at"] == "00:00:30"
     assert captured["end_at"] == "00:02:30"
+    assert captured["output_path"] is None
+    assert proxy_path.read_bytes() == b"downloaded"
+
+
+def test_ingest_url_normalizes_non_mp4_download_to_proxy(monkeypatch, tmp_path: Path):
+    out_dir = tmp_path / "workdir"
+    downloaded_path = out_dir / "source" / "downloaded.webm"
+    proxy_path = out_dir / "proxy.mp4"
+    normalized = {"called": False, "in_path": None, "out_path": None, "fps": None}
+
+    def fake_download(*args, **kwargs):
+        downloaded_path.parent.mkdir(parents=True, exist_ok=True)
+        downloaded_path.write_bytes(b"webm")
+        return YouTubeDownloadResult(
+            source_path=downloaded_path,
+            successful_strategy="default",
+            successful_strategy_args=[],
+            attempts=[{"strategy": "default", "status": "success", "returncode": 0}],
+        )
+
+    monkeypatch.setattr("chevron.ingest._download_youtube", fake_download)
+
+    def fake_normalize(in_path, out_path, fps):
+        normalized["called"] = True
+        normalized["in_path"] = Path(in_path)
+        normalized["out_path"] = Path(out_path)
+        normalized["fps"] = fps
+        Path(out_path).write_bytes(b"normalized")
+
+    monkeypatch.setattr("chevron.ingest.normalize_video", fake_normalize)
+
+    meta = ingest(url="https://youtube.com/watch?v=abc123", video=None, out_dir=out_dir, fps=15)
+
+    assert meta["source"].endswith("downloaded.webm")
+    assert meta["proxy"].endswith("proxy.mp4")
+    assert normalized["called"] is True
+    assert normalized["in_path"] == downloaded_path
+    assert normalized["out_path"] == proxy_path
+    assert normalized["fps"] == 15
 
 
 def test_ingest_local_mp4_copies_to_proxy_without_normalization(monkeypatch, tmp_path: Path):
