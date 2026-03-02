@@ -288,9 +288,9 @@ def _with_user_agent(name: str, args: list[str]) -> dict[str, str | list[str]]:
 def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
     # Ordered from least invasive to most aggressive compatibility workarounds.
     strategies: list[dict[str, str | list[str]]] = [
+        {"name": "android", "args": ["--extractor-args", "youtube:player_client=android"]},
         {"name": "default", "args": []},
         _with_user_agent("default_modern_ua", []),
-        {"name": "android", "args": ["--extractor-args", "youtube:player_client=android"]},
         _with_user_agent("android_modern_ua", ["--extractor-args", "youtube:player_client=android"]),
         {"name": "android_creator", "args": ["--extractor-args", "youtube:player_client=android_creator"]},
         {"name": "android_music", "args": ["--extractor-args", "youtube:player_client=android_music"]},
@@ -365,8 +365,8 @@ def _shuffle_youtube_strategies(url: str, strategies: list[dict[str, str | list[
     if len(strategies) <= 1:
         return list(strategies)
 
-    # Keep the plain default first, but shuffle the remaining fallback strategies per-URL.
-    # This avoids a single static fingerprint while remaining deterministic for a given URL.
+    # Keep the first strategy stable (android-first for anti-throttling),
+    # but shuffle remaining fallback strategies per-URL.
     first = strategies[0]
     remaining = strategies[1:]
 

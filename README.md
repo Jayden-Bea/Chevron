@@ -215,7 +215,7 @@ Debug artifacts:
 - **Segments are too short/long in audio mode**:
   - adjust `segment.match_length_s` to your event timing.
 - **AV1 decode / frame-0 read failures in verify/calibrate**:
-  - Chevron now requests H.264-first formats from yt-dlp. If your source is still AV1-only, transcode once with `ffmpeg -i input.mp4 -c:v libx264 -pix_fmt yuv420p -an fixed.mp4` and ingest `fixed.mp4`.
+  - Chevron now downloads URL sources first, then normalizes the proxy when needed. If you still hit codec-specific issues, transcode locally once with `ffmpeg -i input.mp4 -c:v libx264 -pix_fmt yuv420p -an fixed.mp4` and ingest `fixed.mp4`.
 - **Warp looks stretched**:
   - add better-distributed correspondence points.
   - verify field coordinate units and `px_per_unit`.

@@ -87,16 +87,16 @@ def test_download_youtube_retries_across_clients(monkeypatch, tmp_path: Path):
 
     assert download_result.source_path.name == "abc123.mp4"
     assert len(calls) == 3
-    assert "--extractor-args" not in calls[0]
+    assert "--extractor-args" in calls[0]
     assert calls[0][3:3 + len(_YTDLP_PREFERRED_FORMAT_ARGS)] == _YTDLP_PREFERRED_FORMAT_ARGS
-    assert download_result.attempts[0]["strategy"] == "default"
+    assert download_result.attempts[0]["strategy"] == "android"
     assert download_result.successful_strategy == download_result.attempts[-1]["strategy"]
     assert download_result.attempts[-1]["status"] == "success"
     assert "Using yt-dlp version 2026.02.21" in logs[0]
     assert any("Resolved video metadata; yt-dlp will now attempt to fetch media bytes." in entry for entry in logs)
     assert any("yt-dlp accepted the request and is now downloading the media stream." in entry for entry in logs)
-    assert any("Attempting YouTube ingest strategy=default video='Sample title' args=[]" in entry for entry in logs)
-    assert any("Ingest \x1b[31mfailed\x1b[0m strategy=default returncode=1." in entry for entry in logs)
+    assert any("Attempting YouTube ingest strategy=android video='Sample title'" in entry for entry in logs)
+    assert any("Ingest \x1b[31mfailed\x1b[0m strategy=android returncode=1." in entry for entry in logs)
     assert "Ingest \x1b[32msucceeded\x1b[0m." in logs[-2]
     assert "Saving device settings as:" in logs[-1]
 
@@ -142,7 +142,7 @@ def test_download_youtube_strategies_are_exhaustive_enough_for_fallbacks():
     strategies = _youtube_download_strategies()
     names = [strategy["name"] for strategy in strategies]
 
-    assert names[0] == "default"
+    assert names[0] == "android"
     assert "default_modern_ua" in names
     assert "android" in names
     assert "android_modern_ua" in names
@@ -162,7 +162,7 @@ def test_shuffle_youtube_strategies_is_deterministic_per_url():
     order_c = [entry["name"] for entry in _shuffle_youtube_strategies("https://youtube.com/watch?v=bbb", strategies)]
 
     assert order_a == order_b
-    assert order_a[0] == "default"
+    assert order_a[0] == "android"
     assert order_a != order_c
 
 def test_download_youtube_strategies_include_browser_cookie_fallbacks(monkeypatch):
@@ -395,7 +395,7 @@ def test_download_youtube_falls_back_after_user_browser_cookies_failure(monkeypa
         youtube_cookies_from_browser="edge",
     )
 
-    assert result.successful_strategy == "default"
+    assert result.successful_strategy == "android"
     assert result.attempts[0]["strategy"] == "user_browser_cookies_edge"
     assert result.attempts[0]["status"] == "failed"
 
