@@ -25,13 +25,10 @@ _YTDLP_MIN_VERSION = "2026.02.21"
 _YTDLP_PREFERRED_FORMAT_ARGS = [
     "-f",
     (
-        "bv*[height<=720][vcodec~='^(avc1|h264)'][ext=mp4]+ba[ext=m4a]/"
-        "b[height<=720][vcodec~='^(avc1|h264)'][ext=mp4]/"
-        "bv*[height<=720][vcodec~='^(avc1|h264)']+ba/"
-        "b[height<=720][vcodec~='^(avc1|h264)']/"
-        "bv*[height<=720][ext=mp4]+ba[ext=m4a]/"
+        "bv*[height<=720]+ba/"
         "b[height<=720][ext=mp4]/"
-        "best[height<=720]"
+        "best[height<=720]/"
+        "best"
     ),
     "--concurrent-fragments",
     "8",
@@ -287,9 +284,9 @@ def _with_user_agent(name: str, args: list[str]) -> dict[str, str | list[str]]:
 def _youtube_download_strategies() -> list[dict[str, str | list[str]]]:
     # Ordered from least invasive to most aggressive compatibility workarounds.
     strategies: list[dict[str, str | list[str]]] = [
+        {"name": "android", "args": ["--extractor-args", "youtube:player_client=android"]},
         {"name": "default", "args": []},
         _with_user_agent("default_modern_ua", []),
-        {"name": "android", "args": ["--extractor-args", "youtube:player_client=android"]},
         _with_user_agent("android_modern_ua", ["--extractor-args", "youtube:player_client=android"]),
         {"name": "android_creator", "args": ["--extractor-args", "youtube:player_client=android_creator"]},
         {"name": "android_music", "args": ["--extractor-args", "youtube:player_client=android_music"]},
@@ -364,8 +361,8 @@ def _shuffle_youtube_strategies(url: str, strategies: list[dict[str, str | list[
     if len(strategies) <= 1:
         return list(strategies)
 
-    # Keep the plain default first, but shuffle the remaining fallback strategies per-URL.
-    # This avoids a single static fingerprint while remaining deterministic for a given URL.
+    # Keep the first strategy stable (android-first for anti-throttling),
+    # but shuffle remaining fallback strategies per-URL.
     first = strategies[0]
     remaining = strategies[1:]
 
@@ -673,11 +670,15 @@ def ingest(
             youtube_cookie_header=youtube_cookie_header,
             youtube_cookies_from_browser=youtube_cookies_from_browser,
             youtube_cookies_file=youtube_cookies_file,
-            output_path=proxy_path,
             start_at=start_at,
             end_at=end_at,
         )
         source_path = download_result.source_path
+        if source_path.resolve() != proxy_path.resolve():
+            if source_path.suffix.lower() == ".mp4":
+                shutil.copy2(source_path, proxy_path)
+            else:
+                normalize_video(source_path, proxy_path, fps=fps)
     elif video:
         src = Path(video)
         source_path = source_dir / src.name
