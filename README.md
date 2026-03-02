@@ -91,7 +91,7 @@ chevron run --url "https://youtube.com/watch?v=..." --config configs/example_con
 If YouTube blocks anonymous download attempts (403 / "sign in to confirm you're not a bot"), Chevron also supports a user-provided Cookie header fallback directly via `--youtube-cookie` (or env var `CHEVRON_YOUTUBE_COOKIE`).
 
 Chevron automatically shuffles YouTube client and user-agent fallback strategies during ingest, so most users should not need to pass low-level yt-dlp flags manually.
-Chevron also prefers H.264/AVC video formats during yt-dlp selection, caps URL ingest to 720p (`height<=720`), and uses 8 concurrent fragments where the source supports segmented delivery. This keeps ingest faster while preserving OpenCV-friendly `proxy.mp4` output on more systems.
+Chevron now prioritizes download throughput first: yt-dlp starts with an Android client strategy (commonly less throttled on YouTube), uses adaptive video+audio formats before progressive fallbacks, and applies small HTTP chunk requests (`--http-chunk-size 1M`) to reduce late-download throttling on long transfers. If `aria2c` is installed, Chevron automatically adds high-parallel downloader fallback strategies. Ingest downloads to `workdir/source/` first and only then prepares `workdir/proxy.mp4`, so network transfer is no longer tied to immediate proxy conversion.
 
 During ingest, Chevron now emits active progress lines so long downloads do not look stuck:
 - `yt-dlp heartbeat: ...` confirms the process is still alive (emitted every ~2s of quiet output).
@@ -215,7 +215,7 @@ Debug artifacts:
 - **Segments are too short/long in audio mode**:
   - adjust `segment.match_length_s` to your event timing.
 - **AV1 decode / frame-0 read failures in verify/calibrate**:
-  - Chevron now requests H.264-first formats from yt-dlp. If your source is still AV1-only, transcode once with `ffmpeg -i input.mp4 -c:v libx264 -pix_fmt yuv420p -an fixed.mp4` and ingest `fixed.mp4`.
+  - Chevron now downloads URL sources first, then normalizes the proxy when needed. If you still hit codec-specific issues, transcode locally once with `ffmpeg -i input.mp4 -c:v libx264 -pix_fmt yuv420p -an fixed.mp4` and ingest `fixed.mp4`.
 - **Warp looks stretched**:
   - add better-distributed correspondence points.
   - verify field coordinate units and `px_per_unit`.
