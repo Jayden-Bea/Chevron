@@ -200,6 +200,7 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
     output_lines: list[str] = []
     estimated_total_bytes: int | None = None
     part_path: Path | None = None
+    saw_fragment_progress = False
     last_activity_at = time.monotonic()
 
     while True:
@@ -222,6 +223,12 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
                     estimated_total_bytes = estimated
 
                 if logger and stripped.startswith("[download]"):
+                    lowered = stripped.lower()
+                    has_fragment_counter = "frag " in lowered or "fragment" in lowered
+                    if has_fragment_counter:
+                        saw_fragment_progress = True
+                        logger(f"yt-dlp fragment status: {stripped}")
+
                     if part_path and part_path.exists():
                         part_size = part_path.stat().st_size
                         pct_text = ""
@@ -263,6 +270,12 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
     if return_code != 0:
         combined_output = "\n".join(output_lines)
         raise subprocess.CalledProcessError(return_code, cmd, output=combined_output, stderr="")
+
+    if logger and not saw_fragment_progress:
+        logger(
+            "yt-dlp note: this source did not report fragment counters; "
+            "download may be progressive/single-stream so --concurrent-fragments has no effect."
+        )
 
 
 

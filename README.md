@@ -96,6 +96,7 @@ Chevron also prefers H.264/AVC video formats during yt-dlp selection, caps URL i
 During ingest, Chevron now emits active progress lines so long downloads do not look stuck:
 - `yt-dlp heartbeat: ...` confirms the process is still alive (emitted every ~2s of quiet output).
 - `yt-dlp progress: part=<current .part size> / estimate=<yt-dlp estimated final size>` tracks growth against the expected final size.
+- To verify sharding, look for `yt-dlp fragment status: [download] ... (frag x/y)` in logs; if absent, Chevron logs a note that the source is likely progressive/single-stream and fragment concurrency is not applicable.
 
 If you need to pass a cookie manually, use either of these:
 
