@@ -35,7 +35,6 @@ _YTDLP_PREFERRED_FORMAT_ARGS = [
     ),
     "--concurrent-fragments",
     "8",
-    "--newline",
     "--merge-output-format",
     "mp4",
 ]
@@ -188,36 +187,6 @@ def _resolve_partial_download_path(destination: Path) -> Path:
     return destination.with_suffix(destination.suffix + ".part")
 
 
-def _extract_output_template_from_cmd(cmd: list[str]) -> str | None:
-    try:
-        idx = cmd.index("-o")
-    except ValueError:
-        return None
-    if idx + 1 >= len(cmd):
-        return None
-    return str(cmd[idx + 1])
-
-
-def _find_active_part_file(part_path: Path | None, cmd: list[str]) -> Path | None:
-    if part_path and part_path.exists():
-        return part_path
-
-    output_tmpl = _extract_output_template_from_cmd(cmd)
-    if not output_tmpl:
-        return None
-
-    out_path = Path(output_tmpl)
-    search_dir = out_path.parent if out_path.parent != Path("") else Path.cwd()
-    if not search_dir.exists():
-        return None
-
-    candidates = [p for p in search_dir.glob("*.part") if p.is_file()]
-    if not candidates:
-        return None
-
-    return max(candidates, key=lambda p: p.stat().st_mtime)
-
-
 def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | None = None) -> None:
     process = subprocess.Popen(
         cmd,
@@ -260,16 +229,14 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
                         saw_fragment_progress = True
                         logger(f"yt-dlp fragment status: {stripped}")
 
-                    active_part = _find_active_part_file(part_path, cmd)
-                    if active_part and active_part.exists():
-                        part_size = active_part.stat().st_size
+                    if part_path and part_path.exists():
+                        part_size = part_path.stat().st_size
                         pct_text = ""
                         if estimated_total_bytes:
                             pct = min((part_size / estimated_total_bytes) * 100, 100)
                             pct_text = f" ({pct:.1f}% of estimate)"
                         logger(
                             "yt-dlp progress: "
-                            f"part_file={active_part.name} "
                             f"part={_human_readable_bytes(part_size)}"
                             f" / estimate={_human_readable_bytes(estimated_total_bytes)}{pct_text}"
                         )
@@ -287,10 +254,9 @@ def _run_ytdlp_with_progress(cmd: list[str], logger: Callable[[str], None] | Non
 
         if logger and time.monotonic() - last_activity_at >= _YTDLP_HEARTBEAT_INTERVAL_S:
             heartbeat = "yt-dlp heartbeat: download process still running"
-            active_part = _find_active_part_file(part_path, cmd)
-            if active_part and active_part.exists():
-                part_size = active_part.stat().st_size
-                heartbeat += f", part_file={active_part.name}, part={_human_readable_bytes(part_size)}"
+            if part_path and part_path.exists():
+                part_size = part_path.stat().st_size
+                heartbeat += f", part={_human_readable_bytes(part_size)}"
                 if estimated_total_bytes:
                     pct = min((part_size / estimated_total_bytes) * 100, 100)
                     heartbeat += (
