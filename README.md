@@ -90,18 +90,14 @@ chevron run --url "https://youtube.com/watch?v=..." --config configs/example_con
 
 If YouTube blocks anonymous download attempts (403 / "sign in to confirm you're not a bot"), Chevron also supports a user-provided Cookie header fallback directly via `--youtube-cookie` (or env var `CHEVRON_YOUTUBE_COOKIE`).
 
-
 Chevron automatically shuffles YouTube client and user-agent fallback strategies during ingest, so most users should not need to pass low-level yt-dlp flags manually.
-Chevron also prefers H.264/AVC video formats during yt-dlp selection so the generated `proxy.mp4` is directly decodable by OpenCV on more systems.
+Chevron also prefers H.264/AVC video formats during yt-dlp selection, caps URL ingest to 720p (`height<=720`), and uses 8 concurrent fragments where the source supports segmented delivery. This keeps ingest faster while preserving OpenCV-friendly `proxy.mp4` output on more systems.
 
+During ingest, Chevron now emits active progress lines so long downloads do not look stuck:
+- `yt-dlp heartbeat: ...` confirms the process is still alive (emitted every ~2s of quiet output).
+- `yt-dlp progress: part=<current .part size> / estimate=<yt-dlp estimated final size>` tracks growth against the expected final size.
 
-1. Sign in to YouTube in your browser.
-2. Open browser DevTools → **Network** tab and reload `youtube.com`.
-3. Try to open a request that shows a `Cookie` header in **Request Headers**, then copy just the value.
-4. If DevTools says **"Provisional headers are shown"** and there is no cookie row, use one of these alternatives:
-   - DevTools **Application/Storage → Cookies → https://www.youtube.com** and copy `name=value` pairs, joined by `; `.
-   - Or copy the full request headers block (`Copy request headers`) and paste it directly; Chevron will extract the `Cookie:` line.
-5. Run Chevron with one of the options below:
+If you need to pass a cookie manually, use either of these:
 
 ```bash
 chevron ingest --url "https://youtube.com/watch?v=..." --out workdir/ --youtube-cookie "<COOKIE_OR_HEADER_BLOCK>"

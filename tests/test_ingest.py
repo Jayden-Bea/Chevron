@@ -18,6 +18,13 @@ from chevron.ingest import (
 )
 
 
+def _patch_download_runner(monkeypatch, fake_run):
+    def fake_progress_runner(cmd, logger=None):
+        fake_run(cmd, check=True, text=True, capture_output=True)
+
+    monkeypatch.setattr("chevron.ingest._run_ytdlp_with_progress", fake_progress_runner)
+
+
 @pytest.fixture(autouse=True)
 def mock_minimum_ytdlp_version(monkeypatch):
     monkeypatch.setattr(
@@ -74,7 +81,7 @@ def test_download_youtube_retries_across_clients(monkeypatch, tmp_path: Path):
         return None
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     download_result = _download_youtube("https://youtube.com/watch?v=abc123", tmp_path, logger=logs.append)
 
@@ -104,7 +111,7 @@ def test_download_youtube_raises_on_non_retryable_error(monkeypatch, tmp_path: P
         )
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     with pytest.raises(RuntimeError, match="exhausting all configured YouTube connection strategies"):
         _download_youtube("https://youtube.com/watch?v=abc123", tmp_path)
@@ -123,7 +130,7 @@ def test_download_youtube_raises_runtime_error_after_exhausting_retryable_client
         )
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     with pytest.raises(RuntimeError, match="Last error"):
         _download_youtube("https://youtube.com/watch?v=abc123", tmp_path)
@@ -173,7 +180,7 @@ def test_download_youtube_raises_runtime_error_when_ytdlp_missing(monkeypatch, t
         raise FileNotFoundError("yt-dlp")
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     with pytest.raises(RuntimeError, match="yt-dlp is required"):
         _download_youtube("https://youtube.com/watch?v=abc123", tmp_path)
@@ -191,7 +198,7 @@ def test_download_youtube_logs_auth_guidance_after_auth_related_failures(monkeyp
         )
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     with pytest.raises(RuntimeError, match="Last error"):
         _download_youtube("https://youtube.com/watch?v=abc123", tmp_path, logger=logs.append)
@@ -209,7 +216,7 @@ def test_download_youtube_does_not_log_auth_guidance_on_non_auth_failures(monkey
         raise subprocess.CalledProcessError(returncode=1, cmd=cmd, output="", stderr="ERROR: unavailable")
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     with pytest.raises(RuntimeError, match="Last error"):
         _download_youtube("https://youtube.com/watch?v=abc123", tmp_path, logger=logs.append)
@@ -227,7 +234,7 @@ def test_download_youtube_uses_provided_cookie_header_first(monkeypatch, tmp_pat
         return None
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     result = _download_youtube(
         "https://youtube.com/watch?v=abc123",
@@ -251,7 +258,7 @@ def test_download_youtube_includes_download_sections_when_start_and_end_set(monk
         return None
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     _download_youtube(
         "https://youtube.com/watch?v=abc123",
@@ -280,7 +287,7 @@ def test_download_youtube_falls_back_to_automatic_strategies_when_provided_cooki
         return None
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     result = _download_youtube(
         "https://youtube.com/watch?v=abc123",
@@ -348,7 +355,7 @@ def test_download_youtube_prefers_user_browser_cookies_strategy(monkeypatch, tmp
         return None
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     result = _download_youtube(
         "https://youtube.com/watch?v=abc123",
@@ -380,7 +387,7 @@ def test_download_youtube_falls_back_after_user_browser_cookies_failure(monkeypa
         raise subprocess.CalledProcessError(returncode=1, cmd=cmd, output="", stderr="403 Forbidden")
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     result = _download_youtube(
         "https://youtube.com/watch?v=abc123",
@@ -405,7 +412,7 @@ def test_download_youtube_prefers_user_cookies_file_strategy(monkeypatch, tmp_pa
         return None
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     result = _download_youtube(
         "https://youtube.com/watch?v=abc123",
@@ -442,7 +449,7 @@ def test_download_youtube_accepts_browser_profile_spec(monkeypatch, tmp_path: Pa
         return None
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     result = _download_youtube(
         "https://youtube.com/watch?v=abc123",
@@ -464,7 +471,7 @@ def test_download_youtube_uses_explicit_output_path(monkeypatch, tmp_path: Path)
         return None
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     result = _download_youtube(
         "https://youtube.com/watch?v=abc123",
@@ -487,7 +494,7 @@ def test_download_youtube_uses_explicit_output_path_outside_cache_dir(monkeypatc
         return None
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     result = _download_youtube(
         "https://youtube.com/watch?v=abc123",
@@ -503,7 +510,7 @@ def test_download_youtube_raises_when_success_has_no_output(monkeypatch, tmp_pat
         return None
 
     monkeypatch.setattr("chevron.ingest._resolve_youtube_title", lambda _: "Sample title")
-    monkeypatch.setattr("subprocess.run", fake_run)
+    _patch_download_runner(monkeypatch, fake_run)
 
     with pytest.raises(RuntimeError, match="produced no output files"):
         _download_youtube(
